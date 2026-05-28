@@ -1,0 +1,14 @@
+# Operating Systems
+.DS_Store
+Thumbs.db
+
+# Dev
+dist/
+coverage/
+*.tsbuildinfo
+node_modules
+
+# Other
+*.log
+.eslintcache
+.idea/

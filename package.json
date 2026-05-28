@@ -1,0 +1,63 @@
+{
+  "name": "@mittwald/axios-cache-with-retry",
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.29.2",
+  "author": "Mittwald CM Service GmbH & Co. KG <opensource@mittwald.de>",
+  "contributors": [
+    "Marco Falkenberg <m.falkenberg@mittwald.de>"
+  ],
+  "type": "module",
+  "description": "Coordinated retry, cache and in-flight dedupe for Axios, as a single adapter",
+  "keywords": [
+    "adapter",
+    "axios",
+    "cache",
+    "dedupe",
+    "http",
+    "retry"
+  ],
+  "homepage": "https://github.com/mittwald/axios-cache-with-retry#readme",
+  "repository": "github:mittwald/axios-cache-with-retry",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/types/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "pnpm build:clean && pnpm tsc",
+    "build:clean": "rimraf dist",
+    "format": "prettier --write '**/*.{ts,yaml,yml,json,md}'",
+    "test": "pnpm test:tsc && pnpm test:lint && pnpm test:build && pnpm test:vitest",
+    "test:build": "pnpm build",
+    "test:lint": "eslint . --cache",
+    "test:tsc": "tsc --noEmit -p tsconfig.test.json",
+    "test:vitest": "vitest run"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^24.10.12",
+    "axios": "^1.19.0",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-prettier": "^5.5.5",
+    "prettier": "^3.8.1",
+    "prettier-plugin-jsdoc": "^1.8.0",
+    "prettier-plugin-pkgsort": "^0.3.0",
+    "prettier-plugin-sort-json": "^4.2.0",
+    "rimraf": "^6.1.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.54.0",
+    "vitest": "^4.1.10"
+  },
+  "peerDependencies": {
+    "axios": "^1"
+  }
+}
