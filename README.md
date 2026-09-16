@@ -4,6 +4,14 @@ Coordinated retry, cache and in-flight dedupe for Axios — as a single adapter
 rather than three interceptors that each re-run the request behind each other's
 back.
 
+Retry and caching cannot be composed out of separate interceptors: a retry is a
+second dispatch, so it re-enters the interceptor chain and every layer around it
+sees a request the caller never made. Combining `axios-retry` with
+`axios-cache-interceptor` therefore multiplies requests instead of deduplicating
+them, and which of the two even gets to see a failure depends on
+`validateStatus`. [Why this exists](#why-this-exists) walks through a concrete
+example.
+
 ## Installation
 
 ```bash
@@ -107,6 +115,70 @@ return a promise, so an async backend works as well.
 - **`staleIfError` only serves an expired entry after retries are exhausted**,
   never instead of a retry.
 - **Only responses are cached, never errors.**
+
+## Why this exists
+
+Retry, cache and in-flight deduplication are three decisions about the _same_
+request, but an interceptor can only see a request on its way out and a response
+on its way back. It cannot wrap the dispatch itself — and a retry is by
+definition a second dispatch. So an interceptor-based retry has to re-send the
+config, which means re-entering the interceptor chain, which means every other
+layer sees a request the caller never made. Stacking the layers is the only
+composition the interceptor API offers, and both stacking orders are wrong.
+
+The popular packages each solve one third of the problem and sit in a position
+that collides with the others:
+
+- **`axios-retry`** and **`retry-axios`** hook the response (error) path and
+  retry by re-dispatching the request config.
+- **`axios-cache-interceptor`** caches _and_ deduplicates concurrent requests
+  from a request/response interceptor pair, with its own in-flight bookkeeping
+  keyed per request.
+- **`axios-cache-adapter`** (unmaintained) and **`axios-extensions`**
+  (`cacheAdapterEnhancer`, `throttleAdapterEnhancer`) take the adapter position
+  instead — so they cannot coexist with each other, or with anything else that
+  wants to own the adapter.
+
+### Where it snags
+
+Three components ask for `GET /users` at the same time. The endpoint answers
+`503` twice and then `200`. Retry is configured for two extra attempts, and the
+cache layer deduplicates in-flight requests. One logical request, one expected
+outcome: three responses out of three network calls.
+
+**Deduplication inside the retry** (cache layer closest to the request): dedupe
+collapses the three callers onto one dispatch, that dispatch fails with `503`,
+and the rejection fans back out to all three callers — each of which then runs
+its _own_ retry handler, because each call walks the interceptor chain
+separately. Three retry loops instead of one, up to nine network calls for one
+logical `GET`, and whichever loop happens to finish first decides what ends up
+in the cache while the others are still retrying.
+
+**Retry inside the deduplication** (retry layer closest to the request): every
+re-dispatch looks like a brand-new request to the cache layer above it, while
+that layer's in-flight entry for the first attempt is still open and still
+waiting to be settled by an attempt that has already been abandoned. Depending
+on how the cache keys its pending state, the second attempt either registers
+alongside the first — so the entry that gets stored is not the response the
+caller received — or waits on a promise the retry loop is never going to fulfil.
+
+**And the two layers disagree about what a failure is.** Retry lives on the
+error path, the cache lives on the success path, and which one a `503` takes is
+the caller's `validateStatus` setting. Accept non-2xx responses and the retry
+handler is never invoked at all, while the cache stores the `503` and serves it
+for the rest of its TTL.
+
+### What this package does instead
+
+All three concerns live in a single adapter, the one place that _does_ wrap the
+dispatch. One request key is resolved once, and one shared in-flight promise
+covers the entire operation: the cache lookup, the retry loop, and the cache
+write after the final attempt. Concurrent callers wait for that one result
+instead of starting their own loops, retries never re-enter the interceptor
+chain, and the retry decision is made for returned responses and thrown errors
+alike — so `validateStatus` stops being part of the retry semantics. The
+guarantees that follow from it are listed under
+[Behaviour worth knowing](#behaviour-worth-knowing) above.
 
 ## License
 
