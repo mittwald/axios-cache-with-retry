@@ -131,9 +131,16 @@ setting and not the other, which no single test will catch.
 same body object, so one caller mutating `response.data` mutates what the next
 cache hit or concurrent dedupe caller receives.
 
-**Headers on a cache hit are a lowercased plain object**, not an `AxiosHeaders`
-instance, and `request` is `undefined`. Consumer code calling
-`response.headers.get(...)` works against the network and breaks only on hits.
+**A cache hit flattens the headers.** The snapshot lowercases every name,
+stringifies the values and joins repeated ones with `", "`; axios then re-wraps
+that plain object into `AxiosHeaders` on the way out, so `.get()` keeps working
+either way. What does differ is the shape underneath it: a `set-cookie` that
+arrives from the network as an array comes back from the cache as one joined
+string, index access by the original header casing stops resolving, and
+`response.request` is `undefined`. The same boundary is why `respectRetryAfter`
+indexes `headers["retry-after"]` in lowercase — the retry decision runs inside
+the adapter, before axios normalizes anything, and relies on the adapter
+delivering lowercased names (node's `http` and the xhr adapter both do).
 
 **Nothing evicts on expiry.** `isFresh` is a read-time comparison; expired
 entries are deliberately kept so `staleIfError` can serve them after retries are
