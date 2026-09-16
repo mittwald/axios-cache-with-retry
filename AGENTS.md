@@ -176,5 +176,20 @@ nearly every regression in this library shows up as a wrong call count.
 The version in `package.json` is permanently `0.0.0` and must stay that way.
 `.github/workflows/npm-publish.yml` derives the real version from the git tag
 with `pnpm version from-git --no-git-tag-version` when a GitHub release is
-created, so hand-bumping the manifest achieves nothing. CI tests on Node 22 and
-publishes on Node 24 with npm provenance (`id-token: write`).
+published, so hand-bumping the manifest achieves nothing. CI tests on Node 22
+and publishes on Node 24 with npm provenance (`id-token: write`).
+
+Three details of that workflow are scar tissue. The trigger is
+`types: [published]` and not `[created]`, because `created` also fires when a
+_draft_ release is saved — and a draft has no tag yet, so the job would check
+out nothing and `version from-git` would have nothing to read. The publish step
+calls `npm publish`, not `pnpm publish`: pnpm hands publishing to npm but its
+OIDC handling for trusted publishing is unreliable (pnpm/pnpm#9812,
+pnpm/pnpm#11513), and the failure is an auth error at the very last step of a
+release. And `publishConfig.access` must stay `public`, because a scoped package
+defaults to restricted — without it the first publish either fails with a
+payment error or quietly ships a private package.
+
+Trusted publishing itself cannot be configured before the package exists on the
+registry, so the very first version has to be published with a token from a
+machine, with the workflow taking over from the next tag onwards.

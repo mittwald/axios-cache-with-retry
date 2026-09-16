@@ -2,7 +2,7 @@ name: Publish Node.js Package
 
 on:
   release:
-    types: [created]
+    types: [published]
 
 permissions:
   id-token: write
@@ -23,4 +23,8 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm version from-git --no-git-tag-version
-      - run: pnpm publish --no-git-checks
+      # npm, not pnpm: pnpm delegates publish to npm but its OIDC handling
+      # for trusted publishing is unreliable (pnpm/pnpm#9812, pnpm/pnpm#11513).
+      # --access public is redundant with publishConfig, but a release cut
+      # before that manifest change would otherwise publish as restricted.
+      - run: npm publish --provenance --access public
