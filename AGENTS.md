@@ -191,5 +191,6 @@ defaults to restricted — without it the first publish either fails with a
 payment error or quietly ships a private package.
 
 Trusted publishing itself cannot be configured before the package exists on the
-registry, so the very first version has to be published with a token from a
-machine, with the workflow taking over from the next tag onwards.
+registry, which is why `0.1.0` was published by hand with a token instead of by
+the workflow, and why it carries no provenance attestation. Every version from
+the next tag on goes through the workflow.
