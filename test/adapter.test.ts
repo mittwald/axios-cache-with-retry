@@ -4,7 +4,11 @@ import axios, {
   CanceledError,
 } from "axios";
 import { describe, expect, it, vi } from "vitest";
-import { setupAxiosRetryCache } from "../src/index.js";
+import {
+  createMemoryStorage,
+  type RetryCacheStorage,
+  setupAxiosRetryCache,
+} from "../src/index.js";
 
 function response(
   config: AxiosResponse["config"],
@@ -395,6 +399,73 @@ describe("cache lifecycle", () => {
 
     expect(await client.retryCache.get("/users")).toBeUndefined();
     expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a request whose response cannot be stored", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200),
+    );
+    const storage: RetryCacheStorage = {
+      get: () => undefined,
+      set: () => {
+        throw new Error("storage full");
+      },
+      delete: () => false,
+      clear: () => undefined,
+    };
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000 },
+      retry: { retries: 2, delay: 0 },
+      requestKey: ({ config }) => String(config.url),
+      storage,
+    });
+
+    await expect(client.get("/users")).rejects.toThrow("storage full");
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a request whose shouldCache throws", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: {
+        ttl: 10_000,
+        shouldCache: () => {
+          throw new Error("predicate failed");
+        },
+      },
+      retry: { retries: 2, delay: 0 },
+      requestKey: ({ config }) => String(config.url),
+    });
+
+    await expect(client.get("/users")).rejects.toThrow("predicate failed");
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the cache entry once per request", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200),
+    );
+    const memory = createMemoryStorage();
+    const get = vi.fn((key: string) => memory.get(key));
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000 },
+      retry: { delay: 0 },
+      requestKey: ({ config }) => String(config.url),
+      storage: {
+        get,
+        set: (key, entry) => memory.set(key, entry),
+        delete: (key) => memory.delete(key),
+        clear: () => memory.clear(),
+      },
+    });
+
+    await client.get("/users");
+
+    expect(get).toHaveBeenCalledTimes(1);
   });
 
   it("serves a manually seeded entry and honours a ttl override", async () => {
