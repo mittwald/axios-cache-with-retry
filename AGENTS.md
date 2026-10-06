@@ -129,7 +129,9 @@ requests across bodies; the tests in "deduplication of writes" pin both sides.
 `attempt` starts at 1 and the cap is `attempt > retry.retries`, so `retries: 2`
 means up to three calls in total. The cap is enforced _before_ a custom
 `shouldRetry` is consulted: a custom predicate replaces the method and status
-checks, never the attempt budget.
+checks, never the attempt budget. A cancellation (`isCancel`) ends the retries
+the same way, and the delay listens to the request's `signal`, so an abort never
+waits for the next attempt.
 
 `retryDelay` checks `Retry-After` first when `respectRetryAfter` is on, so a
 configured `delay` function is skipped for any response carrying that header —
@@ -145,6 +147,13 @@ no single test will catch.
 ---
 
 ## Cache, dedupe and storage
+
+**A merged request runs on its own `AbortController`**, not on the first
+caller's signal. `waitFor` in `src/dedupe.ts` counts the callers still waiting:
+an abort rejects only its caller, and the last one to abort aborts the shared
+request and drops the entry, so a new caller starts fresh instead of joining a
+request that is being torn down. A `cancelToken` is still copied into the shared
+config and cancels it for everyone.
 
 **Only 2xx responses are stored by default** because a cached 404 would hide an
 object created later, which is the read-after-write case retry is there for.
