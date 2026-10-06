@@ -141,7 +141,7 @@ describe("opting out", () => {
 });
 
 describe("deduplication of writes", () => {
-  it("merges concurrent identical writes", async () => {
+  it("sends concurrent identical writes separately", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) => {
       await new Promise((resolve) => setTimeout(resolve, 5));
       return response(config, 201);
@@ -153,10 +153,10 @@ describe("deduplication of writes", () => {
       client.post("/orders", { sku: "A" }),
     ]);
 
-    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(adapter).toHaveBeenCalledTimes(2);
   });
 
-  it("merges writes with different bodies when the key ignores the body", async () => {
+  it("sends every write even when the key ignores the body", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) => {
       await new Promise((resolve) => setTimeout(resolve, 5));
       return response(config, 201);
@@ -172,6 +172,7 @@ describe("deduplication of writes", () => {
 
     expect(adapter.mock.calls.map(([config]) => config.data)).toEqual([
       JSON.stringify({ text: "first" }),
+      JSON.stringify({ text: "second" }),
     ]);
   });
 });
