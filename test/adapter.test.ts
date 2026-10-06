@@ -140,7 +140,60 @@ describe("opting out", () => {
   });
 });
 
+describe("deduplication of writes", () => {
+  it("merges concurrent identical writes", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return response(config, 201);
+    });
+    const client = setupAxiosRetryCache(axios.create({ adapter }));
+
+    await Promise.all([
+      client.post("/orders", { sku: "A" }),
+      client.post("/orders", { sku: "A" }),
+    ]);
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges writes with different bodies when the key ignores the body", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return response(config, 201);
+    });
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      requestKey: ({ config }) => `${config.method} ${config.url}`,
+    });
+
+    await Promise.all([
+      client.post("/messages", { text: "first" }),
+      client.post("/messages", { text: "second" }),
+    ]);
+
+    expect(adapter.mock.calls.map(([config]) => config.data)).toEqual([
+      JSON.stringify({ text: "first" }),
+    ]);
+  });
+});
+
 describe("cache lifecycle", () => {
+  it("caches a 404 that validateStatus accepts", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 404),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000 },
+      retry: false,
+      requestKey: ({ config }) => String(config.url),
+    });
+
+    await client.get("/users/1", accepted);
+    const second = await client.get("/users/1", accepted);
+
+    expect(second.status).toBe(404);
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
   it("short-circuits retry on a cache hit", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) =>
       response(config, 200, { fresh: true }),
