@@ -126,6 +126,13 @@ return a promise, so an async backend works as well.
   never instead of a retry.
 - **Only 2xx responses are cached by default, never errors.** A 404 that
   `validateStatus` accepts is not stored either, unless `shouldCache` says so.
+- **An abort ends the retries.** A canceled request is never retried, and an
+  abort during a retry delay rejects at once instead of starting the next
+  attempt.
+- **Merged callers abort on their own.** An abort rejects only the caller whose
+  `signal` fired; the shared request keeps running for the others and is aborted
+  once every caller waiting for it has aborted. The deprecated `cancelToken` is
+  not isolated this way.
 
 ## Why this exists
 
