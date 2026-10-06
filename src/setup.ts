@@ -74,7 +74,8 @@ export function setupAxiosRetryCache(
     );
     const retryEnabled = Boolean(effective.retry);
     const dedupeEnabled =
-      effective.dedupe !== false && SAFE_METHODS.includes(method);
+      effective.dedupe !== false &&
+      (cacheEnabled || SAFE_METHODS.includes(method));
     const requestKey = await resolveRequestKey(options.requestKey, config);
     const cacheKey = requestKey;
     const dedupeKey = requestKey;

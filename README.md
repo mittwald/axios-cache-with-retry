@@ -110,9 +110,10 @@ return a promise, so an async backend works as well.
 - **Deduplication wraps the whole operation**, retries included: concurrent
   callers with the same key wait for one shared result and each receive their
   own shallow copy.
-- **Only safe methods are deduplicated** (`GET`, `HEAD`, `OPTIONS`). Two
-  concurrent writes are two intended operations, so each one reaches the
-  network, whatever its key.
+- **Writes are not deduplicated** unless the cache is enabled for their method.
+  Two concurrent writes are two intended operations, so each one reaches the
+  network, whatever its key. Safe methods (`GET`, `HEAD`, `OPTIONS`) and methods
+  listed in `cache.methods`, such as a search sent as `POST`, are merged.
 - **A cache hit short-circuits before retry**, so a cached response never
   produces a request.
 - **`staleIfError` only serves an expired entry after retries are exhausted**,

@@ -175,6 +175,24 @@ describe("deduplication of writes", () => {
       JSON.stringify({ text: "second" }),
     ]);
   });
+
+  it("still merges requests of a method the cache is enabled for", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return response(config, 200);
+    });
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000, methods: ["get", "post"] },
+      retry: false,
+    });
+
+    await Promise.all([
+      client.post("/search", { query: "ada" }),
+      client.post("/search", { query: "ada" }),
+    ]);
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("cache lifecycle", () => {
