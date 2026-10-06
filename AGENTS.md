@@ -132,6 +132,11 @@ setting and not the other, which no single test will catch.
 
 ## Cache, dedupe and storage
 
+**Without `shouldCache`, only 2xx responses are stored.** Under
+`validateStatus: () => true` a 404 arrives as a response, and caching it would
+keep answering "not found" from the cache after the object exists, which is the
+read-after-write case retry is there for.
+
 **Cached and deduped responses share their `data` by reference.**
 `cloneResponse` and `responseFromCache` copy headers and config but hand out the
 same body object, so one caller mutating `response.data` mutates what the next

@@ -72,7 +72,7 @@ await client.get("/raw", { retryCache: false });
 | `ttl`          | `60000`          | Lifetime of an entry in milliseconds                         |
 | `methods`      | `["get","head"]` | Methods whose responses are cached                           |
 | `staleIfError` | `false`          | Serve an expired entry once retries are exhausted            |
-| `shouldCache`  | —                | Predicate deciding whether a response is stored              |
+| `shouldCache`  | 2xx status       | Predicate deciding whether a response is stored              |
 
 ### `retry`
 
@@ -117,7 +117,8 @@ return a promise, so an async backend works as well.
   produces a request.
 - **`staleIfError` only serves an expired entry after retries are exhausted**,
   never instead of a retry.
-- **Only responses are cached, never errors.**
+- **Only 2xx responses are cached by default, never errors.** A 404 that
+  `validateStatus` accepts is not stored either, unless `shouldCache` says so.
 
 ## Why this exists
 

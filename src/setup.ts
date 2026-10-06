@@ -390,7 +390,10 @@ function shouldCache(
   response: AxiosResponse,
   cache: CacheOptions,
 ): Promise<boolean> | boolean {
-  return cache.shouldCache?.({ key, config, response }) ?? true;
+  return (
+    cache.shouldCache?.({ key, config, response }) ??
+    (response.status >= 200 && response.status < 300)
+  );
 }
 
 function methodAllowed(method: string, methods: string[] | undefined): boolean {
