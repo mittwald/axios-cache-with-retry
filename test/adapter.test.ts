@@ -178,7 +178,7 @@ describe("deduplication of writes", () => {
 });
 
 describe("cache lifecycle", () => {
-  it("caches a 404 that validateStatus accepts", async () => {
+  it("does not cache a 404 that validateStatus accepts", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) =>
       response(config, 404),
     );
@@ -192,7 +192,7 @@ describe("cache lifecycle", () => {
     const second = await client.get("/users/1", accepted);
 
     expect(second.status).toBe(404);
-    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(adapter).toHaveBeenCalledTimes(2);
   });
 
   it("short-circuits retry on a cache hit", async () => {
