@@ -527,7 +527,7 @@ describe("retry timing", () => {
 });
 
 describe("aborting", () => {
-  it("retries a request whose signal was aborted", async () => {
+  it("does not retry a request whose signal was aborted", async () => {
     const adapter = vi.fn<AxiosAdapter>(abortable(200, 50));
     const client = setupAxiosRetryCache(axios.create({ adapter }), {
       cache: false,
@@ -539,10 +539,10 @@ describe("aborting", () => {
     setTimeout(() => controller.abort(), 10);
 
     await expect(request).rejects.toMatchObject({ code: "ERR_CANCELED" });
-    expect(adapter).toHaveBeenCalledTimes(3);
+    expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("waits out the retry delay after an abort", async () => {
+  it("stops waiting for the retry delay on abort", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) =>
       response(config, 503),
     );
@@ -559,7 +559,7 @@ describe("aborting", () => {
     setTimeout(() => controller.abort(), 10);
 
     await expect(request).rejects.toMatchObject({ code: "ERR_CANCELED" });
-    expect(adapter).toHaveBeenCalledTimes(2);
+    expect(adapter).toHaveBeenCalledTimes(1);
   });
 
   it("rejects every merged caller when one of them aborts", async () => {
