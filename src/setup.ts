@@ -44,6 +44,8 @@ const DEFAULT_RETRY: RetryOptions = {
   respectRetryAfter: true,
 };
 
+const SAFE_METHODS = ["get", "head", "options"];
+
 const installedAdapters = new WeakMap<AxiosInstance, AxiosAdapter>();
 
 export function setupAxiosRetryCache(
@@ -71,7 +73,8 @@ export function setupAxiosRetryCache(
       effective.cache && methodAllowed(method, effective.cache.methods),
     );
     const retryEnabled = Boolean(effective.retry);
-    const dedupeEnabled = effective.dedupe !== false;
+    const dedupeEnabled =
+      effective.dedupe !== false && SAFE_METHODS.includes(method);
     const requestKey = await resolveRequestKey(options.requestKey, config);
     const cacheKey = requestKey;
     const dedupeKey = requestKey;
