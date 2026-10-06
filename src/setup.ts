@@ -1,30 +1,15 @@
-import axios, {
-  type AxiosAdapter,
-  type AxiosError,
-  type AxiosInstance,
-  type AxiosResponse,
-  type InternalAxiosRequestConfig,
-} from "axios";
+import axios, { type AxiosAdapter, type AxiosInstance } from "axios";
+import { withCache } from "./cache.js";
+import { type InflightRequests, withDedupe } from "./dedupe.js";
 import { resolveRequestKey } from "./key.js";
-import {
-  cloneResponse,
-  responseFromCache,
-  snapshotResponse,
-} from "./response.js";
-import {
-  DEFAULT_RETRY_STATUS,
-  retryDelay,
-  shouldRetry,
-  sleep,
-} from "./retry.js";
+import { snapshotResponse } from "./response.js";
+import { DEFAULT_RETRY_STATUS, withRetry } from "./retry.js";
 import { createMemoryStorage, deletePrefix } from "./storage.js";
 import type {
   AxiosRetryCacheInstance,
-  CacheEntry,
   CacheOptions,
   RetryCacheOptions,
   RetryCacheRequestOptions,
-  RetryCacheStorage,
   RetryOptions,
 } from "./types.js";
 
@@ -56,7 +41,7 @@ export function setupAxiosRetryCache(
   const originalAdapter =
     installedAdapters.get(instance) ??
     axios.getAdapter(instance.defaults.adapter);
-  const inflight = new Map<string, Promise<AxiosResponse>>();
+  const inflight: InflightRequests = new Map();
 
   installedAdapters.set(instance, originalAdapter);
 
@@ -77,50 +62,26 @@ export function setupAxiosRetryCache(
       effective.dedupe !== false &&
       (cacheEnabled || SAFE_METHODS.includes(method));
     const requestKey = await resolveRequestKey(options.requestKey, config);
-    const cacheKey = requestKey;
-    const dedupeKey = requestKey;
 
     if (!cacheEnabled && !retryEnabled) {
       return originalAdapter(config);
     }
 
-    if (cacheEnabled && cacheKey) {
-      const cached = await storage.get(cacheKey);
+    let adapter = withRetry(originalAdapter, effective.retry);
 
-      if (cached && isFresh(cached)) {
-        return responseFromCache(cached, config);
-      }
-    }
-
-    const operation = () =>
-      runOperation({
-        adapter: originalAdapter,
-        config,
-        cacheKey,
-        cacheEnabled,
-        retry: effective.retry,
+    if (cacheEnabled && effective.cache && requestKey) {
+      adapter = withCache(adapter, {
+        key: requestKey,
         cache: effective.cache,
-        staleEntry:
-          cacheEnabled && cacheKey ? storage.get(cacheKey) : undefined,
         storage,
       });
-
-    if (dedupeEnabled && dedupeKey) {
-      const existing = inflight.get(dedupeKey);
-
-      if (existing) {
-        return cloneResponse(await existing);
-      }
-
-      const promise = operation().finally(() => {
-        inflight.delete(dedupeKey);
-      });
-
-      inflight.set(dedupeKey, promise);
-      return cloneResponse(await promise);
     }
 
-    return operation();
+    if (dedupeEnabled && requestKey) {
+      adapter = withDedupe(adapter, inflight, requestKey);
+    }
+
+    return adapter(config);
   };
 
   const client = instance as AxiosRetryCacheInstance;
@@ -151,118 +112,6 @@ export function setupAxiosRetryCache(
   };
 
   return client;
-}
-
-async function runOperation(input: {
-  adapter: AxiosAdapter;
-  config: InternalAxiosRequestConfig;
-  cacheKey?: string;
-  cacheEnabled: boolean;
-  retry: RetryOptions | false;
-  cache: CacheOptions | false;
-  staleEntry?: CacheEntry | Promise<CacheEntry | undefined>;
-  storage: RetryCacheStorage;
-}): Promise<AxiosResponse> {
-  const staleEntry = await input.staleEntry;
-  let attempt = 1;
-  let lastError: unknown;
-
-  while (true) {
-    try {
-      const response = await input.adapter(input.config);
-      const retryOptions = input.retry;
-      const retry = retryOptions
-        ? await shouldRetry(
-            {
-              attempt,
-              retries: retryOptions.retries,
-              config: input.config,
-              response,
-            },
-            retryOptions,
-          )
-        : false;
-
-      if (retry && retryOptions) {
-        await sleep(
-          await retryDelay(
-            {
-              attempt,
-              retries: retryOptions.retries,
-              config: input.config,
-              response,
-            },
-            retryOptions,
-          ),
-        );
-        attempt += 1;
-        continue;
-      }
-
-      if (
-        input.cacheEnabled &&
-        input.cacheKey &&
-        input.cache &&
-        (await isCacheable(input.cacheKey, input.config, response, input.cache))
-      ) {
-        const now = Date.now();
-        await input.storage?.set(input.cacheKey, {
-          key: input.cacheKey,
-          createdAt: now,
-          expiresAt: now + input.cache.ttl,
-          response: snapshotResponse(response),
-        });
-      }
-
-      return response;
-    } catch (error) {
-      lastError = error;
-
-      const axiosError = error as AxiosError | undefined;
-      const errorResponse = axiosError?.response;
-      const retryOptions = input.retry;
-      const retry = retryOptions
-        ? await shouldRetry(
-            {
-              attempt,
-              retries: retryOptions.retries,
-              config: input.config,
-              response: errorResponse,
-              error: error instanceof Error ? error : undefined,
-            },
-            retryOptions,
-          )
-        : false;
-
-      if (retry && retryOptions) {
-        await sleep(
-          await retryDelay(
-            {
-              attempt,
-              retries: retryOptions.retries,
-              config: input.config,
-              response: errorResponse,
-              error: error instanceof Error ? error : undefined,
-            },
-            retryOptions,
-          ),
-        );
-        attempt += 1;
-        continue;
-      }
-
-      if (
-        input.cache &&
-        input.cache.staleIfError &&
-        staleEntry &&
-        !isFresh(staleEntry)
-      ) {
-        return responseFromCache(staleEntry, input.config);
-      }
-
-      throw lastError;
-    }
-  }
 }
 
 function resolveEffectiveOptions(
@@ -385,24 +234,8 @@ function definedOptions<T extends object>(
   ) as Partial<T>;
 }
 
-function isCacheable(
-  key: string,
-  config: InternalAxiosRequestConfig,
-  response: AxiosResponse,
-  cache: CacheOptions,
-): Promise<boolean> | boolean {
-  return (
-    cache.shouldCache?.({ key, config, response }) ??
-    (response.status >= 200 && response.status < 300)
-  );
-}
-
 function methodAllowed(method: string, methods: string[] | undefined): boolean {
   return (
     !methods || methods.map((value) => value.toLowerCase()).includes(method)
   );
-}
-
-function isFresh(entry: CacheEntry): boolean {
-  return entry.expiresAt > Date.now();
 }

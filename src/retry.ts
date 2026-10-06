@@ -1,4 +1,4 @@
-import type { AxiosError } from "axios";
+import type { AxiosAdapter, AxiosError, AxiosResponse } from "axios";
 import type {
   RetryDecisionContext,
   RetryDelayContext,
@@ -6,6 +6,54 @@ import type {
 } from "./types.js";
 
 export const DEFAULT_RETRY_STATUS = [408, 425, 429, 500, 502, 503, 504];
+
+type Outcome = { response: AxiosResponse } | { error: unknown };
+
+export function withRetry(
+  adapter: AxiosAdapter,
+  retry: RetryOptions | false,
+): AxiosAdapter {
+  if (!retry) {
+    return adapter;
+  }
+
+  return async (config) => {
+    let attempt = 1;
+
+    while (true) {
+      let outcome: Outcome;
+
+      try {
+        outcome = { response: await adapter(config) };
+      } catch (error) {
+        outcome = { error };
+      }
+
+      const error = "error" in outcome ? outcome.error : undefined;
+      const context: RetryDecisionContext = {
+        attempt,
+        retries: retry.retries,
+        config,
+        response:
+          "error" in outcome
+            ? (outcome.error as AxiosError | undefined)?.response
+            : outcome.response,
+        error: error instanceof Error ? error : undefined,
+      };
+
+      if (!(await shouldRetry(context, retry))) {
+        if ("error" in outcome) {
+          throw outcome.error;
+        }
+
+        return outcome.response;
+      }
+
+      await sleep(await retryDelay(context, retry));
+      attempt += 1;
+    }
+  };
+}
 
 export async function shouldRetry(
   context: RetryDecisionContext,

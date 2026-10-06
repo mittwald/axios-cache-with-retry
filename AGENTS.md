@@ -2,8 +2,9 @@
 
 Notes for working in this repository. The README documents the public API and
 every option; this file only covers what the source does not say out loud and
-what has bitten us before. When in doubt, read `src/setup.ts` — it is where all
-of the coordination lives.
+what has bitten us before. When in doubt, read `src/setup.ts`: it resolves the
+options per request and stacks the layers from `src/retry.ts`, `src/cache.ts`
+and `src/dedupe.ts`.
 
 ---
 
@@ -54,13 +55,20 @@ checkout, where pnpm gives the linked package its own `axios`. Reach for
 ## Everything is one adapter
 
 `setupAxiosRetryCache` replaces `instance.defaults.adapter` and returns the same
-instance. Three consequences that are easy to trip over:
+instance. Per request, that adapter stacks up to three layers around the
+original one: `withDedupe(withCache(withRetry(original)))`. Retry is innermost,
+so it only ever repeats the network call. The cache sits outside it and writes
+once all attempts are done. Dedupe is outermost, so merged callers share the
+cache hit, the retries and the write alike. A layer is left out when the request
+does not use it, and a request with neither cache nor retry skips all three.
+
+Three consequences that are easy to trip over:
 
 **Interceptors run once per logical request, not per attempt.** The retry loop
 calls the captured original adapter directly, so request interceptors and
 `transformRequest` do not re-run between attempts, and response interceptors
 only ever see the final outcome. Anything that must happen per attempt belongs
-inside `runOperation`.
+inside `withRetry`.
 
 **The original adapter is captured once, at setup time.** It is resolved with
 `axios.getAdapter(...)`, which turns the string/array form (`"xhr"`, `"http"`)
@@ -127,12 +135,12 @@ checks, never the attempt budget.
 configured `delay` function is skipped for any response carrying that header —
 typically 429s, which is exactly where people expect their own backoff to run.
 
-**The retry decision is implemented twice in `runOperation`**, once for a
-returned response and once for a thrown `AxiosError`, because whether a failure
+**`withRetry` turns every attempt into one outcome**, a returned response or a
+thrown error, and makes a single decision for both, because whether a failure
 arrives as a value or as an exception depends entirely on the caller's
-`validateStatus`. Any change to retry semantics has to be made in both blocks; a
-one-sided change produces a library that retries under one `validateStatus`
-setting and not the other, which no single test will catch.
+`validateStatus`. Keep it that way: a decision split by outcome produces a
+library that retries under one `validateStatus` setting and not the other, which
+no single test will catch.
 
 ---
 
