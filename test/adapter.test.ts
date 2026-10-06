@@ -1,4 +1,8 @@
-import axios, { type AxiosAdapter, type AxiosResponse } from "axios";
+import axios, {
+  type AxiosAdapter,
+  type AxiosResponse,
+  CanceledError,
+} from "axios";
 import { describe, expect, it, vi } from "vitest";
 import { setupAxiosRetryCache } from "../src/index.js";
 
@@ -19,6 +23,27 @@ function response(
 }
 
 const accepted = { validateStatus: () => true };
+
+/** Answers after `latency` ms unless the request's signal aborts first */
+function abortable(status: number, latency: number): AxiosAdapter {
+  return (config) =>
+    new Promise((resolve, reject) => {
+      const abort = () => {
+        clearTimeout(timer);
+        reject(new CanceledError(undefined, config));
+      };
+      const timer = setTimeout(
+        () => resolve(response(config, status)),
+        latency,
+      );
+
+      if (config.signal?.aborted) {
+        abort();
+      } else {
+        config.signal?.addEventListener?.("abort", abort);
+      }
+    });
+}
 
 describe("adapter installation", () => {
   it("does not stack retry loops when setup runs twice on one instance", async () => {
@@ -498,5 +523,69 @@ describe("retry timing", () => {
     await client.get("/health", accepted);
 
     expect(Date.now() - started).toBeGreaterThanOrEqual(15);
+  });
+});
+
+describe("aborting", () => {
+  it("retries a request whose signal was aborted", async () => {
+    const adapter = vi.fn<AxiosAdapter>(abortable(200, 50));
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      retry: { retries: 2, delay: 0 },
+    });
+    const controller = new AbortController();
+
+    const request = client.get("/users", { signal: controller.signal });
+    setTimeout(() => controller.abort(), 10);
+
+    await expect(request).rejects.toMatchObject({ code: "ERR_CANCELED" });
+    expect(adapter).toHaveBeenCalledTimes(3);
+  });
+
+  it("waits out the retry delay after an abort", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 503),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      retry: { retries: 1, delay: 50 },
+    });
+    const controller = new AbortController();
+
+    const request = client.get("/users", {
+      ...accepted,
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 10);
+
+    await expect(request).rejects.toMatchObject({ code: "ERR_CANCELED" });
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects every merged caller when one of them aborts", async () => {
+    const adapter = vi.fn<AxiosAdapter>(abortable(200, 50));
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      retry: { retries: 0 },
+      requestKey: ({ config }) => String(config.url),
+    });
+    const controller = new AbortController();
+
+    const requests = Promise.allSettled([
+      client.get("/users", { signal: controller.signal }),
+      client.get("/users"),
+    ]);
+    setTimeout(() => controller.abort(), 10);
+    const [aborted, other] = await requests;
+
+    expect(aborted).toMatchObject({
+      status: "rejected",
+      reason: { code: "ERR_CANCELED" },
+    });
+    expect(other).toMatchObject({
+      status: "rejected",
+      reason: { code: "ERR_CANCELED" },
+    });
+    expect(adapter).toHaveBeenCalledTimes(1);
   });
 });
