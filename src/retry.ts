@@ -1,4 +1,11 @@
-import type { AxiosAdapter, AxiosError, AxiosResponse } from "axios";
+import {
+  type AxiosAdapter,
+  type AxiosError,
+  type AxiosResponse,
+  CanceledError,
+  type GenericAbortSignal,
+  isCancel,
+} from "axios";
 import type {
   RetryDecisionContext,
   RetryDelayContext,
@@ -49,7 +56,7 @@ export function withRetry(
         return outcome.response;
       }
 
-      await sleep(await retryDelay(context, retry));
+      await sleep(await retryDelay(context, retry), config.signal);
       attempt += 1;
     }
   };
@@ -59,7 +66,7 @@ export async function shouldRetry(
   context: RetryDecisionContext,
   retry: RetryOptions,
 ): Promise<boolean> {
-  if (context.attempt > retry.retries) {
+  if (context.attempt > retry.retries || isCancel(context.error)) {
     return false;
   }
 
@@ -109,13 +116,26 @@ export async function retryDelay(
   return Math.min(100 * 2 ** Math.max(context.attempt - 1, 0), 30_000);
 }
 
-export function sleep(ms: number): Promise<void> {
+export function sleep(ms: number, signal?: GenericAbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new CanceledError());
+  }
+
   if (ms <= 0) {
     return Promise.resolve();
   }
 
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(new CanceledError());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener?.("abort", abort);
+      resolve();
+    }, ms);
+
+    signal?.addEventListener?.("abort", abort);
   });
 }
 

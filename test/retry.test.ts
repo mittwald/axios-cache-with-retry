@@ -1,4 +1,4 @@
-import { AxiosError, AxiosHeaders } from "axios";
+import { AxiosError, AxiosHeaders, CanceledError } from "axios";
 import type { InternalAxiosRequestConfig } from "axios";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -67,6 +67,18 @@ describe("shouldRetry", () => {
       shouldRetry(
         context({ attempt: 3 }),
         options({ retries: 2, shouldRetry: shouldRetryOption }),
+      ),
+    ).resolves.toBe(false);
+    expect(shouldRetryOption).not.toHaveBeenCalled();
+  });
+
+  it("never retries a cancellation, not even through a custom predicate", async () => {
+    const shouldRetryOption = vi.fn(() => true);
+
+    await expect(
+      shouldRetry(
+        context({ error: new CanceledError() }),
+        options({ shouldRetry: shouldRetryOption }),
       ),
     ).resolves.toBe(false);
     expect(shouldRetryOption).not.toHaveBeenCalled();
@@ -271,5 +283,20 @@ describe("sleep", () => {
     await sleep(15);
 
     expect(Date.now() - started).toBeGreaterThanOrEqual(10);
+  });
+
+  it("rejects as soon as its signal aborts", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+
+    try {
+      const sleeping = sleep(10_000, controller.signal);
+      controller.abort();
+
+      await expect(sleeping).rejects.toMatchObject({ code: "ERR_CANCELED" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
