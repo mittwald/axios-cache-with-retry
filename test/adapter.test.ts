@@ -562,7 +562,7 @@ describe("aborting", () => {
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects every merged caller when one of them aborts", async () => {
+  it("keeps a merged request running for the callers that did not abort", async () => {
     const adapter = vi.fn<AxiosAdapter>(abortable(200, 50));
     const client = setupAxiosRetryCache(axios.create({ adapter }), {
       cache: false,
@@ -583,9 +583,37 @@ describe("aborting", () => {
       reason: { code: "ERR_CANCELED" },
     });
     expect(other).toMatchObject({
-      status: "rejected",
-      reason: { code: "ERR_CANCELED" },
+      status: "fulfilled",
+      value: { status: 200 },
     });
     expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts the merged request once every caller has aborted", async () => {
+    const adapter = vi.fn<AxiosAdapter>(abortable(200, 50));
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      retry: { retries: 0 },
+      requestKey: ({ config }) => String(config.url),
+    });
+    const first = new AbortController();
+    const second = new AbortController();
+
+    const requests = Promise.allSettled([
+      client.get("/users", { signal: first.signal }),
+      client.get("/users", { signal: second.signal }),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const sharedSignal = adapter.mock.calls[0]?.[0].signal;
+
+    first.abort();
+    expect(sharedSignal?.aborted).toBe(false);
+
+    second.abort();
+    expect(sharedSignal?.aborted).toBe(true);
+
+    await requests;
+    await client.get("/users");
+    expect(adapter).toHaveBeenCalledTimes(2);
   });
 });
