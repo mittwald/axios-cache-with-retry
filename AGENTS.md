@@ -102,11 +102,14 @@ Dedupe is checked after the early return for "neither cache nor retry is
 enabled", so `dedupe: true` on its own does nothing — a request with both
 features off goes straight to the original adapter.
 
-Dedupe is also limited to `SAFE_METHODS` in `src/setup.ts`. With retry on, a
-write enters the operation path even though it is never retried, and a key that
-leaves out the body, or two identical bodies under the default key, would
-otherwise hand one write the other one's response without ever sending it. The
-tests in "deduplication of writes" pin this.
+Dedupe is also limited to `SAFE_METHODS` in `src/setup.ts`, plus every method
+the cache is enabled for. With retry on, a write enters the operation path even
+though it is never retried, and a key that leaves out the body, or two identical
+bodies under the default key, would otherwise hand one write the other one's
+response without ever sending it. A method listed in `cache.methods` has been
+declared a read (a search sent as `POST`), so merging it stays safe; that is
+also why the default key carries the body for non-`GET`/`HEAD` requests. The
+tests in "deduplication of writes" pin both sides.
 
 ---
 
