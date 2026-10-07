@@ -140,6 +140,23 @@ describe("opting out", () => {
   });
 });
 
+describe("deduplication of safe methods", () => {
+  it("merges concurrent OPTIONS requests", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return response(config, 204);
+    });
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      retry: { delay: 0 },
+    });
+
+    await Promise.all([client.options("/users"), client.options("/users")]);
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("deduplication of writes", () => {
   it("sends concurrent identical writes separately", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) => {
@@ -211,6 +228,46 @@ describe("cache lifecycle", () => {
 
     expect(second.status).toBe(404);
     expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([301, 302, 304, 500])(
+    "does not cache a %i that validateStatus accepts",
+    async (status) => {
+      const adapter = vi.fn<AxiosAdapter>(async (config) =>
+        response(config, status),
+      );
+      const client = setupAxiosRetryCache(axios.create({ adapter }), {
+        cache: { ttl: 10_000 },
+        retry: false,
+        requestKey: ({ config }) => String(config.url),
+      });
+
+      await client.get("/users/1", accepted);
+      const second = await client.get("/users/1", accepted);
+
+      expect(second.status).toBe(status);
+      expect(adapter).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("stores a 404 when a custom shouldCache accepts it", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 404),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: {
+        ttl: 10_000,
+        shouldCache: ({ response }) => response.status === 404,
+      },
+      retry: false,
+      requestKey: ({ config }) => String(config.url),
+    });
+
+    await client.get("/users/1", accepted);
+    const second = await client.get("/users/1", accepted);
+
+    expect(second.status).toBe(404);
+    expect(adapter).toHaveBeenCalledTimes(1);
   });
 
   it("short-circuits retry on a cache hit", async () => {
