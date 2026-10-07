@@ -14,8 +14,6 @@ import type {
 
 export const DEFAULT_RETRY_STATUS = [408, 425, 429, 500, 502, 503, 504];
 
-type Outcome = { response: AxiosResponse } | { error: unknown };
-
 export function withRetry(
   adapter: AxiosAdapter,
   retry: RetryOptions | false,
@@ -28,32 +26,29 @@ export function withRetry(
     let attempt = 1;
 
     while (true) {
-      let outcome: Outcome;
+      let response: AxiosResponse | undefined;
+      let error: unknown;
 
       try {
-        outcome = { response: await adapter(config) };
-      } catch (error) {
-        outcome = { error };
+        response = await adapter(config);
+      } catch (caught) {
+        error = caught;
       }
 
-      const error = "error" in outcome ? outcome.error : undefined;
       const context: RetryDecisionContext = {
         attempt,
         retries: retry.retries,
         config,
-        response:
-          "error" in outcome
-            ? (outcome.error as AxiosError | undefined)?.response
-            : outcome.response,
+        response: response ?? responseOf(error),
         error: error instanceof Error ? error : undefined,
       };
 
       if (!(await shouldRetry(context, retry))) {
-        if ("error" in outcome) {
-          throw outcome.error;
+        if (response) {
+          return response;
         }
 
-        return outcome.response;
+        throw error;
       }
 
       await sleep(await retryDelay(context, retry), config);
@@ -138,17 +133,11 @@ export function sleep(
 function isRetryableNetworkError(
   error: RetryDecisionContext["error"],
 ): boolean {
-  if (!error) {
-    return false;
-  }
+  return Boolean(error) && !responseOf(error);
+}
 
-  const maybeAxiosError = error as AxiosError;
-
-  if (maybeAxiosError.response) {
-    return false;
-  }
-
-  return true;
+function responseOf(error: unknown): AxiosResponse | undefined {
+  return (error as AxiosError | undefined)?.response;
 }
 
 function parseRetryAfter(value: unknown): number | undefined {
