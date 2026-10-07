@@ -35,7 +35,7 @@ export function withCache(
       throw error;
     }
 
-    if (await shouldCache(key, config, response, cache)) {
+    if (await isCacheable(key, config, response, cache)) {
       const now = Date.now();
       await writeEntry(storage, key, {
         key,
@@ -73,7 +73,7 @@ async function writeEntry(
   }
 }
 
-function shouldCache(
+function isCacheable(
   key: string,
   config: InternalAxiosRequestConfig,
   response: AxiosResponse,
