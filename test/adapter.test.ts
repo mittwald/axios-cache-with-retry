@@ -786,6 +786,77 @@ describe("aborting", () => {
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects an abort during the retry delay without a config", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 503),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      dedupe: false,
+      retry: { retries: 1, delay: 50 },
+    });
+    const controller = new AbortController();
+
+    const request = client
+      .get("/users", { ...accepted, signal: controller.signal })
+      .catch((caught: unknown) => caught as AxiosError);
+    setTimeout(() => controller.abort(), 10);
+    const error = await request;
+
+    expect(error).toBeInstanceOf(CanceledError);
+    expect(error.config).toBeUndefined();
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects at the retry delay without a config once an attempt saw the abort", async () => {
+    const controller = new AbortController();
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      controller.abort();
+      return response(config, 503);
+    });
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      dedupe: false,
+      retry: { retries: 1, delay: 50 },
+    });
+
+    const error = await client
+      .get("/users", { ...accepted, signal: controller.signal })
+      .catch((caught: unknown) => caught as AxiosError);
+
+    expect(error).toBeInstanceOf(CanceledError);
+    expect(error.config).toBeUndefined();
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts the shared request for a caller aborted before dedupe runs", async () => {
+    const adapter = vi.fn<AxiosAdapter>(abortable(200, 5));
+    const memory = createMemoryStorage();
+    const get = vi.fn((key: string) => memory.get(key));
+    const controller = new AbortController();
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000 },
+      retry: false,
+      requestKey: ({ config }) => {
+        controller.abort();
+        return String(config.url);
+      },
+      storage: {
+        get,
+        set: (key, entry) => memory.set(key, entry),
+        delete: (key) => memory.delete(key),
+        clear: () => memory.clear(),
+      },
+    });
+
+    await expect(
+      client.get("/users", { signal: controller.signal }),
+    ).rejects.toMatchObject({ code: "ERR_CANCELED" });
+
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a merged request running for the callers that did not abort", async () => {
     const adapter = vi.fn<AxiosAdapter>(abortable(200, 50));
     const client = setupAxiosRetryCache(axios.create({ adapter }), {
