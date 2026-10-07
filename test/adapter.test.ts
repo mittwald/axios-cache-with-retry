@@ -171,6 +171,27 @@ describe("opting out", () => {
   });
 });
 
+describe("the default key", () => {
+  it("gives requests that differ only in their headers one cache entry", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200, config.headers.Authorization),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 60_000 },
+    });
+
+    await client.get("/users/self", {
+      headers: { Authorization: "Bearer alice" },
+    });
+    const bob = await client.get("/users/self", {
+      headers: { Authorization: "Bearer bob" },
+    });
+
+    expect(bob.data).toBe("Bearer alice");
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("deduplication of safe methods", () => {
   it("merges concurrent OPTIONS requests", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) => {
