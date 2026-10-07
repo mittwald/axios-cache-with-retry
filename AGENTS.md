@@ -87,6 +87,16 @@ re-run on every cache hit. Data you read back via `retryCache.get` is therefore
 not what the caller saw, and a response handed to `retryCache.set` is expected
 in the same pre-transform shape.
 
+**Invalidation detaches requests in flight** (`src/flights.ts`), with three ways
+to lose that:
+
+- Deleting in the storage directly bypasses the registry.
+- `flightsByStorage` is module-scoped, like `installedAdapters`: with two copies
+  of this package, invalidating through one does not detach the flights of the
+  other.
+- Every invalidation API on `client.retryCache` has to call `flights.detach`
+  before it deletes; a new one that does not silently brings back #10.
+
 ---
 
 ## Resolving options
