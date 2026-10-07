@@ -85,6 +85,7 @@ await client.get("/raw", { retryCache: false });
 | `retryOnNetworkError` | `true`                              | Retry errors that never produced a response              |
 | `respectRetryAfter`   | `true`                              | Honour a `Retry-After` response header                   |
 | `delay`               | exponential, capped at 30 s         | Fixed milliseconds or a function                         |
+| `maxDelay`            | `30000`                             | Upper bound for every delay, `Infinity` for none         |
 | `shouldRetry`         | —                                   | Replaces the built-in decision entirely                  |
 
 ### `requestKey`
@@ -141,6 +142,10 @@ rules a custom storage's `deletePrefix` applies to stored keys.
   miss, and a write that throws leaves the response uncached. A throwing
   `shouldCache` still rejects the request, and `client.retryCache` passes
   storage errors on.
+- **`Retry-After` above `maxDelay` ends the retries.** The caller gets the
+  response that carried the header at once instead of waiting, since a retry
+  before that time is expected to fail again. A configured `delay` above
+  `maxDelay` is capped at it.
 - **An abort ends the retries.** A canceled request is never retried, and an
   abort during a retry delay rejects at once instead of starting the next
   attempt.

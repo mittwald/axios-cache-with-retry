@@ -732,6 +732,23 @@ describe("retry timing", () => {
     expect(delay).not.toHaveBeenCalled();
   });
 
+  it("returns the response at once when Retry-After asks for more than maxDelay", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 503, undefined, { "retry-after": "3600" }),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      retry: { retries: 1, delay: 2_000 },
+    });
+
+    const started = Date.now();
+    const answer = await client.get("/status", accepted);
+
+    expect(answer.status).toBe(503);
+    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
   it("waits between attempts when a fixed delay is configured", async () => {
     let calls = 0;
     const adapter = vi.fn<AxiosAdapter>(async (config) => {

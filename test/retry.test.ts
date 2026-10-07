@@ -265,17 +265,17 @@ describe("retryDelay", () => {
   });
 });
 
-describe("retryDelay without an upper bound", () => {
-  it("takes a Retry-After of an hour as it is", async () => {
+describe("retryDelay with maxDelay", () => {
+  it("gives up on a Retry-After of an hour", async () => {
     await expect(
       retryDelay(
         context({ response: responseWith(503, { "retry-after": "3600" }) }),
         options({ delay: 2_000, respectRetryAfter: true }),
       ),
-    ).resolves.toBe(3_600_000);
+    ).resolves.toBeUndefined();
   });
 
-  it("takes a Retry-After date two hours ahead as it is", async () => {
+  it("gives up on a Retry-After date two hours ahead", async () => {
     const delay = await retryDelay(
       context({
         response: responseWith(503, {
@@ -285,16 +285,56 @@ describe("retryDelay without an upper bound", () => {
       options({ respectRetryAfter: true }),
     );
 
-    expect(delay).toBeGreaterThan(7_190_000);
+    expect(delay).toBeUndefined();
   });
 
-  it("takes a fixed delay and a function delay above 30s as they are", async () => {
+  it("caps a fixed delay and a function delay at 30s", async () => {
     await expect(
       retryDelay(context(), options({ delay: 60_000 })),
-    ).resolves.toBe(60_000);
+    ).resolves.toBe(30_000);
     await expect(
       retryDelay(context(), options({ delay: () => 60_000 })),
-    ).resolves.toBe(60_000);
+    ).resolves.toBe(30_000);
+  });
+
+  it("waits for a Retry-After of exactly maxDelay", async () => {
+    await expect(
+      retryDelay(
+        context({ response: responseWith(503, { "retry-after": "30" }) }),
+        options({ respectRetryAfter: true }),
+      ),
+    ).resolves.toBe(30_000);
+  });
+
+  it("honours a custom maxDelay", async () => {
+    const retryAfter = context({
+      response: responseWith(503, { "retry-after": "2" }),
+    });
+
+    await expect(
+      retryDelay(
+        retryAfter,
+        options({ respectRetryAfter: true, maxDelay: 1_000 }),
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      retryDelay(context(), options({ delay: 5_000, maxDelay: 1_000 })),
+    ).resolves.toBe(1_000);
+  });
+
+  it("lifts the bound with maxDelay: Infinity", async () => {
+    await expect(
+      retryDelay(
+        context({ response: responseWith(503, { "retry-after": "3600" }) }),
+        options({ respectRetryAfter: true, maxDelay: Infinity }),
+      ),
+    ).resolves.toBe(3_600_000);
+  });
+
+  it("keeps the backoff capped at 30s with maxDelay: Infinity", async () => {
+    await expect(
+      retryDelay(context({ attempt: 20 }), options({ maxDelay: Infinity })),
+    ).resolves.toBe(30_000);
   });
 });
 
