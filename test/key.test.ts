@@ -40,6 +40,24 @@ describe("defaultRequestKey", () => {
     expect(keys.size).toBe(4);
   });
 
+  it("ignores headers, Authorization included", () => {
+    expect(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          headers: new AxiosHeaders({ Authorization: "Bearer alice" }),
+        }),
+      ),
+    ).toBe(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          headers: new AxiosHeaders({ Authorization: "Bearer bob" }),
+        }),
+      ),
+    );
+  });
+
   it("ignores the body for get and head but not for other methods", () => {
     const withBody = { url: "/users", data: { name: "Ada" } };
 
