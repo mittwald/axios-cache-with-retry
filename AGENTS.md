@@ -154,8 +154,10 @@ no single test will catch.
 caller's signal. `waitFor` in `src/dedupe.ts` counts the callers still waiting:
 an abort rejects only its caller, and the last one to abort aborts the shared
 request and drops the entry, so a new caller starts fresh instead of joining a
-request that is being torn down. A `cancelToken` is still copied into the shared
-config and cancels it for everyone.
+request that is being torn down. A caller whose signal has already aborted when
+the dedupe layer runs rejects at once and neither starts nor joins a shared
+request. A `cancelToken` is still copied into the shared config and cancels it
+for everyone.
 
 **Every merged caller gets the outcome with its own `config`.** The layers
 inside the shared request only ever see the shared config (the first caller's,

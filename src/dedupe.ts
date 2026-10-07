@@ -1,7 +1,8 @@
-import type {
-  AxiosAdapter,
-  AxiosResponse,
-  InternalAxiosRequestConfig,
+import {
+  type AxiosAdapter,
+  type AxiosResponse,
+  CanceledError,
+  type InternalAxiosRequestConfig,
 } from "axios";
 import { raceAbort } from "./abort.js";
 import { cloneError, cloneResponse } from "./response.js";
@@ -21,6 +22,10 @@ export function withDedupe(
   key: string,
 ): AxiosAdapter {
   return (config) => {
+    if (config.signal?.aborted) {
+      return Promise.reject(new CanceledError(undefined, config));
+    }
+
     let shared = inflight.get(key);
 
     if (!shared) {

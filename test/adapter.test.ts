@@ -829,7 +829,7 @@ describe("aborting", () => {
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("starts the shared request for a caller aborted before dedupe runs", async () => {
+  it("starts no shared request for a caller aborted before dedupe runs", async () => {
     const adapter = vi.fn<AxiosAdapter>(abortable(200, 5));
     const memory = createMemoryStorage();
     const get = vi.fn((key: string) => memory.get(key));
@@ -851,10 +851,13 @@ describe("aborting", () => {
 
     await expect(
       client.get("/users", { signal: controller.signal }),
-    ).rejects.toMatchObject({ code: "ERR_CANCELED" });
+    ).rejects.toMatchObject({
+      code: "ERR_CANCELED",
+      config: { url: "/users" },
+    });
 
-    expect(get).toHaveBeenCalledTimes(1);
-    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(get).not.toHaveBeenCalled();
+    expect(adapter).not.toHaveBeenCalled();
   });
 
   it("keeps a merged request running for the callers that did not abort", async () => {
