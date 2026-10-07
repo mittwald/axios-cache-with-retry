@@ -40,7 +40,7 @@ function setup(
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("invalidation while a request is in flight", () => {
-  it("lets a caller after invalidate join the request started before it", async () => {
+  it("starts a new request for a caller after invalidate", async () => {
     const network = pending();
     const client = setup(network.adapter);
 
@@ -49,11 +49,14 @@ describe("invalidation while a request is in flight", () => {
     await client.retryCache.invalidate("get:/tickets/1");
     const second = client.get("/tickets/1");
     await tick();
+    network.answer(1, "new");
     network.answer(0, "old");
 
     expect((await first).data).toBe("old");
-    expect((await second).data).toBe("old");
-    expect(network.calls).toBe(1);
+    expect((await second).data).toBe("new");
+    expect(network.calls).toBe(2);
+    const entry = await client.retryCache.get("get:/tickets/1");
+    expect(entry?.response.data).toBe("new");
   });
 
   it("still answers callers that joined before invalidate", async () => {
@@ -71,7 +74,7 @@ describe("invalidation while a request is in flight", () => {
     expect(network.calls).toBe(1);
   });
 
-  it("stores the response of a request that was in flight during invalidate", async () => {
+  it("does not store the response of a request that was in flight during invalidate", async () => {
     const network = pending();
     const client = setup(network.adapter);
 
@@ -81,11 +84,10 @@ describe("invalidation while a request is in flight", () => {
     network.answer(0, "old");
     await first;
 
-    const entry = await client.retryCache.get("get:/tickets/1");
-    expect(entry?.response.data).toBe("old");
+    expect(await client.retryCache.get("get:/tickets/1")).toBeUndefined();
   });
 
-  it("stores the response of a request that was in flight during invalidatePrefix", async () => {
+  it("does not store the response of a request that was in flight during invalidatePrefix", async () => {
     const network = pending();
     const client = setup(network.adapter);
 
@@ -95,11 +97,10 @@ describe("invalidation while a request is in flight", () => {
     network.answer(0, "old");
     await first;
 
-    const entry = await client.retryCache.get("get:/tickets/1");
-    expect(entry?.response.data).toBe("old");
+    expect(await client.retryCache.get("get:/tickets/1")).toBeUndefined();
   });
 
-  it("stores the response of a request that was in flight during clear", async () => {
+  it("does not store the response of a request that was in flight during clear", async () => {
     const network = pending();
     const client = setup(network.adapter);
 
@@ -109,8 +110,29 @@ describe("invalidation while a request is in flight", () => {
     network.answer(0, "old");
     await first;
 
-    const entry = await client.retryCache.get("get:/tickets/1");
-    expect(entry?.response.data).toBe("old");
+    expect(await client.retryCache.get("get:/tickets/1")).toBeUndefined();
+  });
+
+  it("does not store a response when invalidate runs while shouldCache decides", async () => {
+    const network = pending();
+    let decide: (store: boolean) => void = () => undefined;
+    const client = setup(network.adapter, {
+      cache: {
+        ttl: 60_000,
+        shouldCache: () =>
+          new Promise<boolean>((resolve) => (decide = resolve)),
+      },
+    });
+
+    const first = client.get("/tickets/1");
+    await tick();
+    network.answer(0, "old");
+    await tick();
+    await client.retryCache.invalidate("get:/tickets/1");
+    decide(true);
+    await first;
+
+    expect(await client.retryCache.get("get:/tickets/1")).toBeUndefined();
   });
 
   it("leaves requests whose key does not match alone", async () => {
@@ -130,7 +152,7 @@ describe("invalidation while a request is in flight", () => {
     expect(network.calls).toBe(1);
   });
 
-  it("stores the response of another instance's request after invalidating through one instance on the same storage", async () => {
+  it("does not store the response of another instance's request after invalidating through one instance on the same storage", async () => {
     const storage = createMemoryStorage();
     const network = pending();
     const internal = setup(network.adapter, { storage });
@@ -142,11 +164,10 @@ describe("invalidation while a request is in flight", () => {
     network.answer(0, "old");
     await first;
 
-    const entry = await storage.get("get:/tickets/1");
-    expect(entry?.response.data).toBe("old");
+    expect(await storage.get("get:/tickets/1")).toBeUndefined();
   });
 
-  it("lets a caller after invalidate join a request that is deduplicated but not cached", async () => {
+  it("starts a new request after invalidate when requests are deduplicated but not cached", async () => {
     const network = pending();
     const client = setup(network.adapter, { cache: false, retry: {} });
 
@@ -156,8 +177,10 @@ describe("invalidation while a request is in flight", () => {
     const second = client.get("/tickets/1");
     await tick();
     network.answer(0, "old");
-    await Promise.all([first, second]);
+    network.answer(1, "new");
 
-    expect(network.calls).toBe(1);
+    expect((await second).data).toBe("new");
+    await first;
+    expect(network.calls).toBe(2);
   });
 });

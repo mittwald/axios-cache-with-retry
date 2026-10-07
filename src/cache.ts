@@ -3,6 +3,7 @@ import type {
   AxiosResponse,
   InternalAxiosRequestConfig,
 } from "axios";
+import type { Flights } from "./flights.js";
 import { responseFromCache, snapshotResponse } from "./response.js";
 import type { CacheEntry, CacheOptions, RetryCacheStorage } from "./types.js";
 
@@ -10,11 +11,12 @@ export interface CacheLayerOptions {
   key: string;
   cache: CacheOptions;
   storage: RetryCacheStorage;
+  flights: Flights;
 }
 
 export function withCache(
   adapter: AxiosAdapter,
-  { key, cache, storage }: CacheLayerOptions,
+  { key, cache, storage, flights }: CacheLayerOptions,
 ): AxiosAdapter {
   return async (config) => {
     const entry = await readEntry(storage, key);
@@ -23,29 +25,38 @@ export function withCache(
       return responseFromCache(entry, config);
     }
 
-    let response: AxiosResponse;
+    const flight = flights.track(key);
 
     try {
-      response = await adapter(config);
-    } catch (error) {
-      if (cache.staleIfError && entry) {
-        return responseFromCache(entry, config);
+      let response: AxiosResponse;
+
+      try {
+        response = await adapter(config);
+      } catch (error) {
+        if (cache.staleIfError && entry) {
+          return responseFromCache(entry, config);
+        }
+
+        throw error;
       }
 
-      throw error;
-    }
+      if (
+        (await isCacheable(key, config, response, cache)) &&
+        !flight.detached
+      ) {
+        const now = Date.now();
+        await writeEntry(storage, key, {
+          key,
+          createdAt: now,
+          expiresAt: now + cache.ttl,
+          response: snapshotResponse(response),
+        });
+      }
 
-    if (await isCacheable(key, config, response, cache)) {
-      const now = Date.now();
-      await writeEntry(storage, key, {
-        key,
-        createdAt: now,
-        expiresAt: now + cache.ttl,
-        response: snapshotResponse(response),
-      });
+      return response;
+    } finally {
+      flight.land();
     }
-
-    return response;
   };
 }
 

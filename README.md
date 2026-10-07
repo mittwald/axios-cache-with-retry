@@ -105,6 +105,13 @@ return a promise, so an async backend works as well.
 `clear`. `invalidatePrefix` needs a storage that implements either
 `deletePrefix` or `keys` — the built-in memory storage implements both.
 
+An invalidation also reaches requests in flight with a matching key: the next
+caller starts a new request instead of joining one that began before, and the
+response of the earlier request is not stored. Callers that were already waiting
+still get it. This only works through `client.retryCache`, which covers every
+instance set up on the same storage; deleting entries in the storage directly
+leaves requests in flight untouched.
+
 ## Behaviour worth knowing
 
 - **Deduplication wraps the whole operation**, retries included: concurrent

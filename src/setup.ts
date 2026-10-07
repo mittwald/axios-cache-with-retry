@@ -5,6 +5,7 @@ import { resolveRequestKey } from "./key.js";
 import { snapshotResponse } from "./response.js";
 import { DEFAULT_RETRY_STATUS, withRetry } from "./retry.js";
 import { createMemoryStorage, deletePrefix } from "./storage.js";
+import { flightsFor } from "./flights.js";
 import type {
   AxiosRetryCacheInstance,
   CacheOptions,
@@ -42,6 +43,7 @@ export function setupAxiosRetryCache(
     installedAdapters.get(instance) ??
     axios.getAdapter(instance.defaults.adapter);
   const inflight: InflightRequests = new Map();
+  const flights = flightsFor(storage);
 
   installedAdapters.set(instance, originalAdapter);
 
@@ -70,11 +72,16 @@ export function setupAxiosRetryCache(
     let adapter = withRetry(originalAdapter, effective.retry);
 
     if (cache && requestKey) {
-      adapter = withCache(adapter, { key: requestKey, cache, storage });
+      adapter = withCache(adapter, {
+        key: requestKey,
+        cache,
+        storage,
+        flights,
+      });
     }
 
     if (dedupeEnabled && requestKey) {
-      adapter = withDedupe(adapter, inflight, requestKey);
+      adapter = withDedupe(adapter, inflight, requestKey, flights);
     }
 
     return adapter(config);
@@ -97,12 +104,15 @@ export function setupAxiosRetryCache(
       });
     },
     async invalidate(key) {
+      flights.detach((flightKey) => flightKey === key);
       return storage.delete(key);
     },
     async invalidatePrefix(prefix) {
+      flights.detach((flightKey) => flightKey.startsWith(prefix));
       return deletePrefix(storage, prefix);
     },
     async clear() {
+      flights.detach(() => true);
       await storage.clear();
     },
   };

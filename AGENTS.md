@@ -87,6 +87,14 @@ re-run on every cache hit. Data you read back via `retryCache.get` is therefore
 not what the caller saw, and a response handed to `retryCache.set` is expected
 in the same pre-transform shape.
 
+**Invalidation detaches requests in flight.** `withDedupe` and `withCache`
+register every request they run in `Flights` (`src/flights.ts`), one registry
+per storage, so `invalidate`, `invalidatePrefix` and `clear` of any instance on
+that storage reach them. A detached shared request leaves the dedupe map, and
+`withCache` skips its write; the flight lands only after the write, so an
+invalidation during an async `shouldCache` still counts. Deleting in the storage
+directly bypasses the registry.
+
 ---
 
 ## Resolving options
