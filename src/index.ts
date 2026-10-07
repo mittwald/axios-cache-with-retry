@@ -14,4 +14,5 @@ export type {
   RetryDecisionContext,
   RetryDelayContext,
   RetryOptions,
+  StorageErrorContext,
 } from "./types.js";

@@ -108,6 +108,24 @@ Defaults to an in-memory store. Pass `createMemoryStorage({ maxEntries })` for a
 bounded one, or any object implementing `RetryCacheStorage`; every method may
 return a promise, so an async backend works as well.
 
+### `onStorageError`
+
+Called when the cache layer swallows a storage error, so a storage that is down
+shows up in logs or metrics instead of only as uncached requests:
+
+```ts
+setupAxiosRetryCache(instance, {
+  storage,
+  onStorageError: ({ operation, key, error }) => {
+    logger.warn({ operation, key, error }, "retry cache storage failed");
+  },
+});
+```
+
+`operation` is `"get"` or `"set"`. The callback only observes: the request
+behaves the same with or without it, and an error the callback throws, or a
+promise it returns that rejects, is swallowed as well.
+
 ## Cache API
 
 `client.retryCache` exposes `get`, `set`, `invalidate`, `invalidatePrefix` and
@@ -149,7 +167,7 @@ rules a custom storage's `deletePrefix` applies to stored keys.
 - **A failing storage never fails a request.** A read that throws counts as a
   miss, and a write that throws leaves the response uncached. A throwing
   `shouldCache` still rejects the request, and `client.retryCache` passes
-  storage errors on.
+  storage errors on. `onStorageError` reports what the cache layer swallows.
 - **`Retry-After` above `maxDelay` ends the retries.** The caller gets the
   response that carried the header at once instead of waiting, since a retry
   before that time is expected to fail again. A configured `delay` above
