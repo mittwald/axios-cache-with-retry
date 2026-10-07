@@ -17,7 +17,7 @@ export function withCache(
   { key, cache, storage }: CacheLayerOptions,
 ): AxiosAdapter {
   return async (config) => {
-    const entry = await storage.get(key);
+    const entry = await readEntry(storage, key);
 
     if (entry && isFresh(entry)) {
       return responseFromCache(entry, config);
@@ -37,7 +37,7 @@ export function withCache(
 
     if (await shouldCache(key, config, response, cache)) {
       const now = Date.now();
-      await storage.set(key, {
+      await writeEntry(storage, key, {
         key,
         createdAt: now,
         expiresAt: now + cache.ttl,
@@ -47,6 +47,30 @@ export function withCache(
 
     return response;
   };
+}
+
+async function readEntry(
+  storage: RetryCacheStorage,
+  key: string,
+): Promise<CacheEntry | undefined> {
+  try {
+    return await storage.get(key);
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeEntry(
+  storage: RetryCacheStorage,
+  key: string,
+  entry: CacheEntry,
+): Promise<boolean> {
+  try {
+    await storage.set(key, entry);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function shouldCache(

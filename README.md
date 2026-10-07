@@ -127,6 +127,10 @@ return a promise, so an async backend works as well.
   never instead of a retry.
 - **Only 2xx responses are cached by default, never errors.** A 404 that
   `validateStatus` accepts is not stored either, unless `shouldCache` says so.
+- **A failing storage never fails a request.** A read that throws counts as a
+  miss, and a write that throws leaves the response uncached. A throwing
+  `shouldCache` still rejects the request, and `client.retryCache` passes
+  storage errors on.
 - **An abort ends the retries.** A canceled request is never retried, and an
   abort during a retry delay rejects at once instead of starting the next
   attempt.

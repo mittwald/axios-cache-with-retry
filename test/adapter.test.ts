@@ -502,7 +502,7 @@ describe("cache lifecycle", () => {
     expect(adapter).toHaveBeenCalledTimes(2);
   });
 
-  it("does not retry a request whose response cannot be stored", async () => {
+  it("answers a request whose response cannot be stored", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) =>
       response(config, 200),
     );
@@ -521,12 +521,13 @@ describe("cache lifecycle", () => {
       storage,
     });
 
-    await expect(client.get("/users")).rejects.toThrow("storage full");
+    const result = await client.get("/users");
 
+    expect(result.status).toBe(200);
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a request whose cache entry cannot be read", async () => {
+  it("fetches a request whose cache entry cannot be read", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) =>
       response(config, 200),
     );
@@ -545,9 +546,36 @@ describe("cache lifecycle", () => {
       storage,
     });
 
-    await expect(client.get("/users")).rejects.toThrow("storage down");
+    const result = await client.get("/users");
 
-    expect(adapter).not.toHaveBeenCalled();
+    expect(result.status).toBe(200);
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers a request when an async storage rejects", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200),
+    );
+    const storage: RetryCacheStorage = {
+      get: () => Promise.reject(new Error("storage down")),
+      set: () => Promise.reject(new Error("storage full")),
+      delete: () => Promise.resolve(false),
+      clear: () => Promise.resolve(),
+    };
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000 },
+      retry: { retries: 2, delay: 0 },
+      requestKey: ({ config }) => String(config.url),
+      storage,
+    });
+
+    const result = await client.get("/users");
+
+    expect(result.status).toBe(200);
+    expect(adapter).toHaveBeenCalledTimes(1);
+    await expect(client.retryCache.get("/users")).rejects.toThrow(
+      "storage down",
+    );
   });
 
   it("does not retry a request whose shouldCache throws", async () => {
