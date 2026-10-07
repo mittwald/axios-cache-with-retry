@@ -2,10 +2,10 @@ import {
   type AxiosAdapter,
   type AxiosError,
   type AxiosResponse,
-  CanceledError,
   type InternalAxiosRequestConfig,
   isCancel,
 } from "axios";
+import { raceAbort } from "./abort.js";
 import type {
   RetryDecisionContext,
   RetryDelayContext,
@@ -120,28 +120,19 @@ export function sleep(
   ms: number,
   config: InternalAxiosRequestConfig,
 ): Promise<void> {
-  const { signal } = config;
-
-  if (signal?.aborted) {
-    return Promise.reject(new CanceledError(undefined, config));
-  }
-
   if (ms <= 0) {
-    return Promise.resolve();
+    return raceAbort(Promise.resolve(), config);
   }
 
-  return new Promise((resolve, reject) => {
-    const abort = () => {
-      clearTimeout(timer);
-      reject(new CanceledError(undefined, config));
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener?.("abort", abort);
-      resolve();
-    }, ms);
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
-    signal?.addEventListener?.("abort", abort);
-  });
+  return raceAbort(
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, ms);
+    }),
+    config,
+    () => clearTimeout(timer),
+  );
 }
 
 function isRetryableNetworkError(

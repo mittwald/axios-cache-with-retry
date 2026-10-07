@@ -1,15 +1,16 @@
-import {
-  type AxiosAdapter,
-  type AxiosResponse,
-  CanceledError,
-  type InternalAxiosRequestConfig,
+import type {
+  AxiosAdapter,
+  AxiosResponse,
+  InternalAxiosRequestConfig,
 } from "axios";
+import { raceAbort } from "./abort.js";
 import { cloneError, cloneResponse } from "./response.js";
 
 interface SharedRequest {
   promise: Promise<AxiosResponse>;
   controller: AbortController;
   waiting: number;
+  forget: () => void;
 }
 
 export type InflightRequests = Map<string, SharedRequest>;
@@ -24,63 +25,47 @@ export function withDedupe(
 
     if (!shared) {
       const controller = new AbortController();
-      const promise = adapter({ ...config, signal: controller.signal });
-      const created: SharedRequest = { promise, controller, waiting: 0 };
-      const forget = () => {
-        if (inflight.get(key) === created) {
-          inflight.delete(key);
-        }
+      const created: SharedRequest = {
+        promise: adapter({ ...config, signal: controller.signal }),
+        controller,
+        waiting: 0,
+        forget: () => {
+          if (inflight.get(key) === created) {
+            inflight.delete(key);
+          }
+        },
       };
 
-      promise.then(forget, forget);
+      created.promise.then(created.forget, created.forget);
       inflight.set(key, created);
       shared = created;
     }
 
-    return waitFor(shared, config, () => {
-      if (inflight.get(key) === shared) {
-        inflight.delete(key);
-      }
-    });
+    return waitFor(shared, config);
   };
 }
 
 function waitFor(
   shared: SharedRequest,
   config: InternalAxiosRequestConfig,
-  forget: () => void,
 ): Promise<AxiosResponse> {
-  const { signal } = config;
-
   shared.waiting += 1;
 
-  return new Promise((resolve, reject) => {
-    const abort = () => {
+  return raceAbort(
+    shared.promise.then(
+      (response) => cloneResponse(response, config),
+      (error: unknown) => {
+        throw cloneError(error, config);
+      },
+    ),
+    config,
+    () => {
       shared.waiting -= 1;
 
       if (shared.waiting === 0) {
-        forget();
+        shared.forget();
         shared.controller.abort();
       }
-
-      reject(new CanceledError(undefined, config));
-    };
-
-    if (signal?.aborted) {
-      abort();
-      return;
-    }
-
-    signal?.addEventListener?.("abort", abort);
-    shared.promise.then(
-      (response) => {
-        signal?.removeEventListener?.("abort", abort);
-        resolve(cloneResponse(response, config));
-      },
-      (error: unknown) => {
-        signal?.removeEventListener?.("abort", abort);
-        reject(cloneError(error, config));
-      },
-    );
-  });
+    },
+  );
 }
