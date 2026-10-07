@@ -33,7 +33,7 @@ export function withCache(
       try {
         response = await adapter(config);
       } catch (error) {
-        if (cache.staleIfError && entry) {
+        if (cache.staleIfError && entry && !flight.detached) {
           return responseFromCache(entry, config);
         }
 

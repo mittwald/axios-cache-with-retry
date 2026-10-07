@@ -108,9 +108,12 @@ return a promise, so an async backend works as well.
 An invalidation also reaches requests in flight with a matching key: the next
 caller starts a new request instead of joining one that began before, and the
 response of the earlier request is not stored. Callers that were already waiting
-still get it. This only works through `client.retryCache`, which covers every
-instance set up on the same storage; deleting entries in the storage directly
-leaves requests in flight untouched.
+still get it, but never the stale entry from before the invalidation: with
+`staleIfError`, a detached request that fails rejects. This only works through
+`client.retryCache`, which covers every instance set up on the same storage;
+deleting entries in the storage directly leaves requests in flight untouched.
+`invalidatePrefix` matches requests in flight by plain string prefix, whatever
+rules a custom storage's `deletePrefix` applies to stored keys.
 
 ## Behaviour worth knowing
 

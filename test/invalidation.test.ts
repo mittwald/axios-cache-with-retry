@@ -212,7 +212,7 @@ describe("invalidation while a request is in flight", () => {
 });
 
 describe("a detached request that fails", () => {
-  it("serves the entry from before invalidate with staleIfError", async () => {
+  it("does not serve the entry from before invalidate, even with staleIfError", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     let fail: (error: Error) => void = () => undefined;
     const adapter = vi
@@ -239,7 +239,7 @@ describe("a detached request that fails", () => {
       await client.retryCache.invalidate("get:/tickets/1");
       fail(new Error("network down"));
 
-      expect((await waiting).data).toBe("before");
+      await expect(waiting).rejects.toThrow("network down");
       expect(adapter).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
