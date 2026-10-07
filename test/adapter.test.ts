@@ -1,5 +1,6 @@
 import axios, {
   type AxiosAdapter,
+  type AxiosHeaders,
   AxiosError,
   type AxiosResponse,
   CanceledError,
@@ -345,9 +346,10 @@ describe("merged callers", () => {
     });
 
     const fail = (caller: string) =>
-      client
-        .get("/users", { headers: { "x-caller": caller } })
-        .catch((error: unknown) => error as AxiosError);
+      client.get("/users", { headers: { "x-caller": caller } }).then(
+        () => undefined,
+        (error: unknown) => error as AxiosError,
+      );
     const [firstError, secondError] = await Promise.all([
       fail("first"),
       fail("second"),
@@ -687,10 +689,13 @@ describe("cache lifecycle", () => {
     const live = await client.get("/users");
     const hit = await client.get("/users");
 
-    expect(live.headers.get("set-cookie")).toEqual(["a=1", "b=2"]);
+    expect((live.headers as AxiosHeaders).get("set-cookie")).toEqual([
+      "a=1",
+      "b=2",
+    ]);
     expect(live.request).toEqual({ id: 1 });
 
-    expect(hit.headers.get("set-cookie")).toBe("a=1, b=2");
+    expect((hit.headers as AxiosHeaders).get("set-cookie")).toBe("a=1, b=2");
     expect(hit.headers["x-total"]).toBe("7");
     expect(hit.request).toBeUndefined();
   });
