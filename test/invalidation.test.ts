@@ -246,3 +246,23 @@ describe("a detached request that fails", () => {
     }
   });
 });
+
+describe("stored entries", () => {
+  it("keep the key, the timestamps and the response, nothing about the request", async () => {
+    const network = pending();
+    const client = setup(network.adapter);
+
+    const first = client.get("/tickets/1", { baseURL: "https://api.test" });
+    await tick();
+    network.answer(0, "ticket");
+    await first;
+
+    const entry = await client.retryCache.get("get:/tickets/1");
+    expect(Object.keys(entry ?? {}).sort()).toEqual([
+      "createdAt",
+      "expiresAt",
+      "key",
+      "response",
+    ]);
+  });
+});
