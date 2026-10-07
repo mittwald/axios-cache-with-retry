@@ -1,3 +1,4 @@
+import { isDead } from "./cache.js";
 import type {
   Awaitable,
   CacheEntry,
@@ -7,21 +8,35 @@ import type {
 
 export interface MemoryStorageOptions {
   maxEntries?: number;
+  sweepInterval?: number;
 }
+
+const DEFAULT_MAX_ENTRIES = 1024;
+const DEFAULT_SWEEP_INTERVAL = 5 * 60_000;
 
 export class MemoryRetryCacheStorage<
   T = unknown,
 > implements RetryCacheStorage<T> {
   private readonly entries = new Map<string, CacheEntry<T>>();
+  private lastSweep = Date.now();
 
   constructor(private readonly options: MemoryStorageOptions = {}) {}
 
   get(key: string): CacheEntry<T> | undefined {
-    return this.entries.get(key);
+    const entry = this.entries.get(key);
+
+    if (entry) {
+      this.entries.delete(key);
+      this.entries.set(key, entry);
+    }
+
+    return entry;
   }
 
   set(key: string, entry: CacheEntry<T>): void {
+    this.entries.delete(key);
     this.entries.set(key, entry);
+    this.sweep();
     this.enforceMaxEntries();
   }
 
@@ -49,10 +64,27 @@ export class MemoryRetryCacheStorage<
     return deleted;
   }
 
-  private enforceMaxEntries(): void {
-    const { maxEntries } = this.options;
+  private sweep(): void {
+    const now = Date.now();
+    const interval = this.options.sweepInterval ?? DEFAULT_SWEEP_INTERVAL;
 
-    if (!maxEntries || this.entries.size <= maxEntries) {
+    if (now - this.lastSweep < interval) {
+      return;
+    }
+
+    this.lastSweep = now;
+
+    for (const [key, entry] of this.entries) {
+      if (isDead(entry, now)) {
+        this.entries.delete(key);
+      }
+    }
+  }
+
+  private enforceMaxEntries(): void {
+    const maxEntries = this.options.maxEntries ?? DEFAULT_MAX_ENTRIES;
+
+    if (this.entries.size <= maxEntries) {
       return;
     }
 

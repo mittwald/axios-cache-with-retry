@@ -21,6 +21,7 @@ export interface CacheOptions {
   ttl: number;
   methods?: string[];
   staleIfError?: boolean;
+  maxStaleAge?: number;
   shouldCache?: (context: CacheDecisionContext) => Awaitable<boolean>;
 }
 
@@ -99,6 +100,8 @@ export interface CacheEntry<T = unknown> {
   key: string;
   createdAt: number;
   expiresAt: number;
+  /** Last moment the entry may be served at all; without it, no limit */
+  staleUntil?: number;
   response: CachedResponse<T>;
   request?: CachedRequest;
 }

@@ -72,6 +72,7 @@ await client.get("/raw", { retryCache: false });
 | `ttl`          | `60000`          | Lifetime of an entry in milliseconds                         |
 | `methods`      | `["get","head"]` | Methods whose responses are cached                           |
 | `staleIfError` | `false`          | Serve an expired entry once retries are exhausted            |
+| `maxStaleAge`  | unlimited        | How long after expiry `staleIfError` may serve an entry, ms  |
 | `shouldCache`  | 2xx status       | Predicate deciding whether a response is stored              |
 
 ### `retry`
@@ -120,9 +121,19 @@ const requestKey = ({ config }) =>
 
 ### `storage`
 
-Defaults to an in-memory store. Pass `createMemoryStorage({ maxEntries })` for a
-bounded one, or any object implementing `RetryCacheStorage`; every method may
-return a promise, so an async backend works as well.
+Defaults to an in-memory store, or pass any object implementing
+`RetryCacheStorage`; every method may return a promise, so an async backend
+works as well.
+
+`createMemoryStorage({ maxEntries, sweepInterval })` keeps at most `maxEntries`
+entries (default `1024`, `Infinity` for no limit) and evicts the least recently
+read or written one. On the first write after `sweepInterval` milliseconds
+(default five minutes) it also removes entries that can no longer be served.
+
+An entry can no longer be served once its `staleUntil` has passed: right at
+expiry when it was written without `staleIfError`, `maxStaleAge` after expiry
+with it, and never without `maxStaleAge`. A request that reads such an entry
+deletes it, whatever the storage.
 
 ### `onStorageError`
 

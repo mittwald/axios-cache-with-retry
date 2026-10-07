@@ -51,7 +51,7 @@ describe("MemoryRetryCacheStorage", () => {
     expect(Array.from(storage.keys())).toEqual(["b", "c"]);
   });
 
-  it("is not an LRU: re-setting a key does not make it younger", () => {
+  it("makes a key younger when it is set again", () => {
     const storage = createMemoryStorage({ maxEntries: 2 });
 
     storage.set("a", entry("a"));
@@ -59,10 +59,10 @@ describe("MemoryRetryCacheStorage", () => {
     storage.set("a", entry("a"));
     storage.set("c", entry("c"));
 
-    expect(Array.from(storage.keys())).toEqual(["b", "c"]);
+    expect(Array.from(storage.keys())).toEqual(["a", "c"]);
   });
 
-  it("does not make a key younger when it is read", () => {
+  it("makes a key younger when it is read", () => {
     const storage = createMemoryStorage({ maxEntries: 2 });
 
     storage.set("a", entry("a"));
@@ -70,11 +70,23 @@ describe("MemoryRetryCacheStorage", () => {
     storage.get("a");
     storage.set("c", entry("c"));
 
-    expect(Array.from(storage.keys())).toEqual(["b", "c"]);
+    expect(Array.from(storage.keys())).toEqual(["a", "c"]);
   });
 
-  it("keeps more than 1024 entries without maxEntries", () => {
+  it("keeps the 1024 most recent entries without maxEntries", () => {
     const storage = createMemoryStorage();
+
+    for (let index = 0; index < 2000; index += 1) {
+      storage.set(String(index), entry(String(index)));
+    }
+
+    const keys = Array.from(storage.keys());
+    expect(keys).toHaveLength(1024);
+    expect(keys[0]).toBe("976");
+  });
+
+  it("keeps every entry with maxEntries: Infinity", () => {
+    const storage = createMemoryStorage({ maxEntries: Infinity });
 
     for (let index = 0; index < 2000; index += 1) {
       storage.set(String(index), entry(String(index)));
