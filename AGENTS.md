@@ -229,7 +229,9 @@ its caller already gets the error.
 
 `src/index.ts` is the entire public surface. Several helpers are exported from
 their own modules for testing convenience but are not re-exported there, and are
-not API.
+not API. `defaultRequestKey` and `stableSerialize` are the exception: they are
+re-exported so custom keys can reuse them, and changing their output changes
+every consumer's keys. `test/exports.test.ts` pins the runtime exports.
 
 ---
 

@@ -1,3 +1,4 @@
+export { defaultRequestKey, stableSerialize } from "./key.js";
 export { setupAxiosRetryCache } from "./setup.js";
 export { createMemoryStorage, MemoryRetryCacheStorage } from "./storage.js";
 export type {

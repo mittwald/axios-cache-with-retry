@@ -102,6 +102,22 @@ server, where one axios instance serves many users, it hands one user's response
 to another: there, either turn cache and dedupe off or use a `requestKey` that
 includes the user.
 
+`defaultRequestKey(config)` and `stableSerialize(value)` are exported, so a
+custom key can build on the default or reuse its serialization, which sorts
+object keys and `URLSearchParams`:
+
+```ts
+import {
+  defaultRequestKey,
+  stableSerialize,
+} from "@mittwald/axios-cache-with-retry";
+
+const requestKey = ({ config }) =>
+  config.url?.startsWith("/search")
+    ? `search:${config.url}:${stableSerialize(config.data)}`
+    : defaultRequestKey(config);
+```
+
 ### `storage`
 
 Defaults to an in-memory store. Pass `createMemoryStorage({ maxEntries })` for a
