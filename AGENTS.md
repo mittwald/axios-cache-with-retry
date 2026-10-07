@@ -104,12 +104,15 @@ features off goes straight to the original adapter.
 
 Dedupe is also limited to `SAFE_METHODS` in `src/setup.ts`, plus every method
 the cache is enabled for. With retry on, a write enters the operation path even
-though it is never retried, and a key that leaves out the body, or two identical
-bodies under the default key, would otherwise hand one write the other one's
-response without ever sending it. A method listed in `cache.methods` has been
-declared a read (a search sent as `POST`), so merging it stays safe; that is
-also why the default key carries the body for non-`GET`/`HEAD` requests. The
-tests in "deduplication of writes" pin both sides.
+though it is not retried by default, and a key that leaves out the body, or two
+identical bodies under the default key, would otherwise hand one write the other
+one's response without ever sending it. A method listed in `cache.methods` has
+been declared a read (a search sent as `POST`), so merging it is exactly as safe
+as caching it: both treat requests with one key as one request. That is why the
+default key carries the body for every method outside `METHODS_WITHOUT_BODY` in
+`src/key.ts`, a narrower list than `SAFE_METHODS` because an `OPTIONS` request
+may carry a body. A custom key that leaves the body out merges and caches such
+requests across bodies; the tests in "deduplication of writes" pin both sides.
 
 ---
 
@@ -135,10 +138,8 @@ setting and not the other, which no single test will catch.
 
 ## Cache, dedupe and storage
 
-**Without `shouldCache`, only 2xx responses are stored.** Under
-`validateStatus: () => true` a 404 arrives as a response, and caching it would
-keep answering "not found" from the cache after the object exists, which is the
-read-after-write case retry is there for.
+**Only 2xx responses are stored by default** because a cached 404 would hide an
+object created later, which is the read-after-write case retry is there for.
 
 **Cached and deduped responses share their `data` by reference.**
 `cloneResponse` and `responseFromCache` copy headers and config but hand out the
