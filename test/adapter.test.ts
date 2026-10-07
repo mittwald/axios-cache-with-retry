@@ -769,19 +769,40 @@ describe("retry timing", () => {
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("gives up even on Retry-After: 0 with maxDelay: NaN", async () => {
+  it.each([Number.NaN, -1, "30000"])(
+    "refuses maxDelay: %s at setup",
+    (maxDelay) => {
+      expect(() =>
+        setupAxiosRetryCache(axios.create(), {
+          retry: { maxDelay: maxDelay as number },
+        }),
+      ).toThrow(TypeError);
+    },
+  );
+
+  it("rejects a request with an invalid maxDelay without sending it", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) =>
-      response(config, 503, undefined, { "retry-after": "0" }),
+      response(config, 200),
     );
     const client = setupAxiosRetryCache(axios.create({ adapter }), {
       cache: false,
-      retry: { retries: 1, delay: 0, maxDelay: Number.NaN },
     });
 
-    const answer = await client.get("/status", accepted);
+    await expect(
+      client.get("/status", {
+        retryCache: { retry: { maxDelay: Number.NaN } },
+      }),
+    ).rejects.toThrow(TypeError);
+    expect(adapter).not.toHaveBeenCalled();
+  });
 
-    expect(answer.status).toBe(503);
-    expect(adapter).toHaveBeenCalledTimes(1);
+  it("accepts maxDelay: 0 and Infinity", () => {
+    expect(() =>
+      setupAxiosRetryCache(axios.create(), { retry: { maxDelay: 0 } }),
+    ).not.toThrow();
+    expect(() =>
+      setupAxiosRetryCache(axios.create(), { retry: { maxDelay: Infinity } }),
+    ).not.toThrow();
   });
 
   it("waits between attempts when a fixed delay is configured", async () => {

@@ -39,6 +39,7 @@ export function setupAxiosRetryCache(
   instance: AxiosInstance,
   options: RetryCacheOptions = {},
 ): AxiosRetryCacheInstance {
+  assertValidRetry(options.retry);
   const storage = options.storage ?? createMemoryStorage();
   const originalAdapter =
     installedAdapters.get(instance) ??
@@ -189,6 +190,8 @@ function resolveRetryOptions(
     return false;
   }
 
+  assertValidRetry(requestRetry);
+
   if (requestRetry === true) {
     return {
       ...normalizeRetryOptions(globalRetry),
@@ -209,6 +212,21 @@ function resolveRetryOptions(
   };
 
   return retry.enabled === false ? false : retry;
+}
+
+function assertValidRetry(
+  retry: RetryCacheOptions["retry"] | RetryCacheRequestOptions["retry"],
+): void {
+  const maxDelay = typeof retry === "object" ? retry.maxDelay : undefined;
+
+  if (
+    maxDelay !== undefined &&
+    !(typeof maxDelay === "number" && maxDelay >= 0)
+  ) {
+    throw new TypeError(
+      `retry.maxDelay must be a number >= 0 or Infinity, got ${String(maxDelay)}`,
+    );
+  }
 }
 
 function normalizeCacheOptions(
