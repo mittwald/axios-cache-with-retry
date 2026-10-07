@@ -148,6 +148,11 @@ request's config, as the ones from axios' own adapters do.
 `retryDelay` checks `Retry-After` first when `respectRetryAfter` is on, so a
 configured `delay` function is skipped for any response carrying that header —
 typically 429s, which is exactly where people expect their own backoff to run.
+`maxDelay` (default 30 s) bounds every delay, but not alike: a configured
+`delay` or the backoff is capped at it, while a `Retry-After` above it ends the
+retries, because a retry before the time the server asked for is expected to
+fail again. `retryDelay` signals that with `undefined`, and `withRetry` then
+returns the last outcome as if `shouldRetry` had said no.
 
 **`withRetry` turns every attempt into one outcome**, a returned response or a
 thrown error, and makes a single decision for both, because whether a failure

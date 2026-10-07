@@ -3,7 +3,7 @@ import { withCache } from "./cache.js";
 import { type InflightRequests, withDedupe } from "./dedupe.js";
 import { resolveRequestKey } from "./key.js";
 import { snapshotResponse } from "./response.js";
-import { DEFAULT_RETRY_STATUS, withRetry } from "./retry.js";
+import { DEFAULT_MAX_DELAY, DEFAULT_RETRY_STATUS, withRetry } from "./retry.js";
 import { createMemoryStorage, deletePrefix } from "./storage.js";
 import { flightsFor } from "./flights.js";
 import type {
@@ -30,6 +30,7 @@ const DEFAULT_RETRY: RetryOptions = {
   retryOnStatus: DEFAULT_RETRY_STATUS,
   retryOnNetworkError: true,
   respectRetryAfter: true,
+  maxDelay: DEFAULT_MAX_DELAY,
 };
 
 const installedAdapters = new WeakMap<AxiosInstance, AxiosAdapter>();

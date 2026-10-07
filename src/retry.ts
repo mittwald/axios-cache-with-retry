@@ -13,6 +13,7 @@ import type {
 } from "./types.js";
 
 export const DEFAULT_RETRY_STATUS = [408, 425, 429, 500, 502, 503, 504];
+export const DEFAULT_MAX_DELAY = 30_000;
 
 export function withRetry(
   adapter: AxiosAdapter,
@@ -43,7 +44,11 @@ export function withRetry(
         error: error instanceof Error ? error : undefined,
       };
 
-      if (!(await shouldRetry(context, retry))) {
+      const delay = (await shouldRetry(context, retry))
+        ? await retryDelay(context, retry)
+        : undefined;
+
+      if (delay === undefined) {
         if (response) {
           return response;
         }
@@ -51,7 +56,7 @@ export function withRetry(
         throw error;
       }
 
-      await sleep(await retryDelay(context, retry), config);
+      await sleep(delay, config);
       attempt += 1;
     }
   };
@@ -88,18 +93,27 @@ export async function shouldRetry(
   );
 }
 
+/** Resolves to `undefined` when `Retry-After` asks for more than `maxDelay` */
 export async function retryDelay(
   context: RetryDelayContext,
   retry: RetryOptions,
-): Promise<number> {
+): Promise<number | undefined> {
+  const maxDelay = retry.maxDelay ?? DEFAULT_MAX_DELAY;
   const retryAfter = retry.respectRetryAfter
     ? parseRetryAfter(context.response?.headers?.["retry-after"])
     : undefined;
 
   if (retryAfter !== undefined) {
-    return retryAfter;
+    return retryAfter <= maxDelay ? retryAfter : undefined;
   }
 
+  return Math.min(await configuredDelay(context, retry), maxDelay);
+}
+
+async function configuredDelay(
+  context: RetryDelayContext,
+  retry: RetryOptions,
+): Promise<number> {
   if (typeof retry.delay === "number") {
     return retry.delay;
   }

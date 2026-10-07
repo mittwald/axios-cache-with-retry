@@ -50,6 +50,7 @@ export interface RetryOptions {
   retryOnStatus?: number[];
   retryOnNetworkError?: boolean;
   respectRetryAfter?: boolean;
+  maxDelay?: number;
   delay?: number | ((context: RetryDelayContext) => Awaitable<number>);
   shouldRetry?: (context: RetryDecisionContext) => Awaitable<boolean>;
 }
