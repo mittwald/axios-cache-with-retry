@@ -1,6 +1,8 @@
 import type { InternalAxiosRequestConfig } from "axios";
 import type { RetryCacheRequestKey } from "./types.js";
 
+const METHODS_WITHOUT_BODY = ["get", "head"];
+
 export async function resolveRequestKey(
   key: RetryCacheRequestKey | undefined,
   config: InternalAxiosRequestConfig,
@@ -19,8 +21,9 @@ export function defaultRequestKey(
   const baseURL = config.baseURL ?? "";
   const url = config.url ?? "";
   const params = stableSerialize(config.params);
-  const data =
-    method === "get" || method === "head" ? "" : stableSerialize(config.data);
+  const data = METHODS_WITHOUT_BODY.includes(method)
+    ? ""
+    : stableSerialize(config.data);
 
   if (!url) {
     return undefined;
