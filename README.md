@@ -76,17 +76,17 @@ await client.get("/raw", { retryCache: false });
 
 ### `retry`
 
-| Option                | Default                             | Description                                              |
-| --------------------- | ----------------------------------- | -------------------------------------------------------- |
-| `enabled`             | `true`                              | Set to `false` to keep retry off until a request opts in |
-| `retries`             | `2`                                 | Attempts after the initial one                           |
-| `methods`             | `["get","head","options"]`          | Methods that may be retried                              |
-| `retryOnStatus`       | `408, 425, 429, 500, 502, 503, 504` | Status codes that trigger a retry                        |
-| `retryOnNetworkError` | `true`                              | Retry errors that never produced a response              |
-| `respectRetryAfter`   | `true`                              | Honour a `Retry-After` response header                   |
-| `delay`               | exponential, capped at 30 s         | Fixed milliseconds or a function                         |
-| `maxDelay`            | `30000`                             | Upper bound for every delay, `Infinity` for none         |
-| `shouldRetry`         | —                                   | Replaces the built-in decision entirely                  |
+| Option                | Default                             | Description                                                                                         |
+| --------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `enabled`             | `true`                              | Set to `false` to keep retry off until a request opts in                                            |
+| `retries`             | `2`                                 | Attempts after the initial one                                                                      |
+| `methods`             | `["get","head","options"]`          | Methods that may be retried                                                                         |
+| `retryOnStatus`       | `408, 425, 429, 500, 502, 503, 504` | Status codes that trigger a retry                                                                   |
+| `retryOnNetworkError` | `true`                              | Retry errors that never produced a response                                                         |
+| `respectRetryAfter`   | `true`                              | Honour a `Retry-After` response header                                                              |
+| `delay`               | exponential, capped at 30 s         | Fixed milliseconds or a function; the backoff stays at 30 s even with a larger `maxDelay`           |
+| `maxDelay`            | `30000`                             | Upper bound for every delay, `Infinity` for none; anything but a number >= 0 throws                 |
+| `shouldRetry`         | —                                   | Replaces the built-in decision, except that a `Retry-After` above `maxDelay` still ends the retries |
 
 ### `requestKey`
 

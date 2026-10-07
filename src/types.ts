@@ -50,6 +50,12 @@ export interface RetryOptions {
   retryOnStatus?: number[];
   retryOnNetworkError?: boolean;
   respectRetryAfter?: boolean;
+  /**
+   * Upper bound in milliseconds for every delay, 30 000 by default and
+   * `Infinity` for none. A configured `delay` or the backoff is capped at it,
+   * while a `Retry-After` above it ends the retries, even when `shouldRetry`
+   * returns `true`. Anything but a number >= 0 throws.
+   */
   maxDelay?: number;
   delay?: number | ((context: RetryDelayContext) => Awaitable<number>);
   shouldRetry?: (context: RetryDecisionContext) => Awaitable<boolean>;
