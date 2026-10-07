@@ -54,27 +54,23 @@ export function setupAxiosRetryCache(
 
     const effective = resolveEffectiveOptions(options, requestOptions);
     const method = (config.method ?? "get").toLowerCase();
-    const cacheEnabled = Boolean(
-      effective.cache && methodAllowed(method, effective.cache.methods),
-    );
-    const retryEnabled = Boolean(effective.retry);
+    const cache =
+      effective.cache && methodAllowed(method, effective.cache.methods)
+        ? effective.cache
+        : undefined;
     const dedupeEnabled =
       effective.dedupe !== false &&
-      (cacheEnabled || SAFE_METHODS.includes(method));
+      (cache !== undefined || SAFE_METHODS.includes(method));
     const requestKey = await resolveRequestKey(options.requestKey, config);
 
-    if (!cacheEnabled && !retryEnabled) {
+    if (!cache && !effective.retry) {
       return originalAdapter(config);
     }
 
     let adapter = withRetry(originalAdapter, effective.retry);
 
-    if (cacheEnabled && effective.cache && requestKey) {
-      adapter = withCache(adapter, {
-        key: requestKey,
-        cache: effective.cache,
-        storage,
-      });
+    if (cache && requestKey) {
+      adapter = withCache(adapter, { key: requestKey, cache, storage });
     }
 
     if (dedupeEnabled && requestKey) {
