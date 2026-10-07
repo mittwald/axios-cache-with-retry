@@ -265,6 +265,39 @@ describe("retryDelay", () => {
   });
 });
 
+describe("retryDelay without an upper bound", () => {
+  it("takes a Retry-After of an hour as it is", async () => {
+    await expect(
+      retryDelay(
+        context({ response: responseWith(503, { "retry-after": "3600" }) }),
+        options({ delay: 2_000, respectRetryAfter: true }),
+      ),
+    ).resolves.toBe(3_600_000);
+  });
+
+  it("takes a Retry-After date two hours ahead as it is", async () => {
+    const delay = await retryDelay(
+      context({
+        response: responseWith(503, {
+          "retry-after": new Date(Date.now() + 7_200_000).toUTCString(),
+        }),
+      }),
+      options({ respectRetryAfter: true }),
+    );
+
+    expect(delay).toBeGreaterThan(7_190_000);
+  });
+
+  it("takes a fixed delay and a function delay above 30s as they are", async () => {
+    await expect(
+      retryDelay(context(), options({ delay: 60_000 })),
+    ).resolves.toBe(60_000);
+    await expect(
+      retryDelay(context(), options({ delay: () => 60_000 })),
+    ).resolves.toBe(60_000);
+  });
+});
+
 describe("sleep", () => {
   it("resolves without a timer for a non-positive duration", async () => {
     vi.useFakeTimers();
