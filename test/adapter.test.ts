@@ -1,5 +1,6 @@
 import axios, {
   type AxiosAdapter,
+  AxiosError,
   type AxiosResponse,
   CanceledError,
 } from "axios";
@@ -290,6 +291,76 @@ describe("deduplication of writes", () => {
   });
 });
 
+describe("merged callers", () => {
+  it("hands every merged caller the first caller's config", async () => {
+    const adapter = vi.fn<AxiosAdapter>(abortable(200, 5));
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000 },
+      retry: false,
+      requestKey: ({ config }) => String(config.url),
+    });
+
+    const [first, second] = await Promise.all([
+      client.get("/users", { headers: { "x-caller": "first" } }),
+      client.get("/users", { headers: { "x-caller": "second" } }),
+    ]);
+
+    expect(first.config.headers["x-caller"]).toBe("first");
+    expect(second.config.headers["x-caller"]).toBe("first");
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects merged callers with one shared error", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      throw new AxiosError("Network Error", "ERR_NETWORK", config);
+    });
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000 },
+      retry: false,
+      requestKey: ({ config }) => String(config.url),
+    });
+
+    const fail = (caller: string) =>
+      client
+        .get("/users", { headers: { "x-caller": caller } })
+        .catch((error: unknown) => error as AxiosError);
+    const [firstError, secondError] = await Promise.all([
+      fail("first"),
+      fail("second"),
+    ]);
+
+    expect(firstError).toBeInstanceOf(AxiosError);
+    expect(secondError).toBe(firstError);
+    expect(secondError?.config?.headers["x-caller"]).toBe("first");
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a merged caller's abort without a config", async () => {
+    const adapter = vi.fn<AxiosAdapter>(abortable(200, 50));
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000 },
+      retry: false,
+      requestKey: ({ config }) => String(config.url),
+    });
+    const controller = new AbortController();
+
+    const aborted = client
+      .get("/users", {
+        headers: { "x-caller": "first" },
+        signal: controller.signal,
+      })
+      .catch((error: unknown) => error as AxiosError);
+    const other = client.get("/users");
+    setTimeout(() => controller.abort(), 10);
+    const [error] = await Promise.all([aborted, other]);
+
+    expect(error).toBeInstanceOf(CanceledError);
+    expect(error.config).toBeUndefined();
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("cache lifecycle", () => {
   it("does not cache a 404 that validateStatus accepts", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) =>
@@ -423,6 +494,30 @@ describe("cache lifecycle", () => {
     await expect(client.get("/users")).rejects.toThrow("storage full");
 
     expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a request whose cache entry cannot be read", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200),
+    );
+    const storage: RetryCacheStorage = {
+      get: () => {
+        throw new Error("storage down");
+      },
+      set: () => undefined,
+      delete: () => false,
+      clear: () => undefined,
+    };
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000 },
+      retry: { retries: 2, delay: 0 },
+      requestKey: ({ config }) => String(config.url),
+      storage,
+    });
+
+    await expect(client.get("/users")).rejects.toThrow("storage down");
+
+    expect(adapter).not.toHaveBeenCalled();
   });
 
   it("does not retry a request whose shouldCache throws", async () => {
