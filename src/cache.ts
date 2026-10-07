@@ -4,6 +4,7 @@ import type {
   InternalAxiosRequestConfig,
 } from "axios";
 import type { Flights } from "./flights.js";
+import { describeRequest } from "./key.js";
 import { responseFromCache, snapshotResponse } from "./response.js";
 import type {
   CacheEntry,
@@ -35,7 +36,8 @@ export function withCache(
       return responseFromCache(entry, config);
     }
 
-    const flight = flights.track(key);
+    const request = describeRequest(config);
+    const flight = flights.track({ key, ...request });
 
     try {
       let response: AxiosResponse;
@@ -63,6 +65,7 @@ export function withCache(
             createdAt: now,
             expiresAt: now + cache.ttl,
             response: snapshotResponse(response),
+            request,
           },
           report,
         );

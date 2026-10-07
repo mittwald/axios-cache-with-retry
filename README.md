@@ -144,9 +144,22 @@ promise it returns that rejects, is swallowed as well.
 
 ## Cache API
 
-`client.retryCache` exposes `get`, `set`, `invalidate`, `invalidatePrefix` and
-`clear`. `invalidatePrefix` needs a storage that implements either
-`deletePrefix` or `keys` — the built-in memory storage implements both.
+`client.retryCache` exposes `get`, `set`, `invalidate`, `invalidatePrefix`,
+`invalidateWhere` and `clear`. `invalidatePrefix` needs a storage that
+implements either `deletePrefix` or `keys` — the built-in memory storage
+implements both.
+
+`invalidateWhere(predicate)` deletes every entry the predicate matches and
+returns how many it deleted. The predicate gets `{ key, method, url, baseURL }`,
+taken from the request that stored the entry, so a consumer can match on the URL
+without parsing its own key format. An entry stored without that information
+passes only `key`. It needs a storage that implements `keys`.
+
+```ts
+await client.retryCache.invalidateWhere(
+  ({ url }) => url?.startsWith("/tickets/") ?? false,
+);
+```
 
 An invalidation also reaches requests in flight with a matching key: the next
 caller starts a new request instead of joining one that began before, and the

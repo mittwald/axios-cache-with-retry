@@ -1,4 +1,9 @@
-import type { Awaitable, CacheEntry, RetryCacheStorage } from "./types.js";
+import type {
+  Awaitable,
+  CacheEntry,
+  InvalidationTarget,
+  RetryCacheStorage,
+} from "./types.js";
 
 export interface MemoryStorageOptions {
   maxEntries?: number;
@@ -95,6 +100,32 @@ export async function deletePrefix(
     const didDelete = await storage.delete(key);
 
     if (didDelete) {
+      deleted += 1;
+    }
+  }
+
+  return deleted;
+}
+
+export async function deleteWhere(
+  storage: RetryCacheStorage,
+  predicate: (target: InvalidationTarget) => boolean,
+): Promise<number> {
+  if (!storage.keys) {
+    throw new Error("Storage backend does not support predicate invalidation.");
+  }
+
+  let deleted = 0;
+  const keys = Array.from(await storage.keys());
+
+  for (const key of keys) {
+    const entry = await storage.get(key);
+
+    if (!predicate({ key, ...entry?.request })) {
+      continue;
+    }
+
+    if (await storage.delete(key)) {
       deleted += 1;
     }
   }

@@ -87,8 +87,7 @@ re-run on every cache hit. Data you read back via `retryCache.get` is therefore
 not what the caller saw, and a response handed to `retryCache.set` is expected
 in the same pre-transform shape.
 
-**Invalidation detaches requests in flight** (`src/flights.ts`), with three ways
-to lose that:
+**Invalidation detaches requests in flight** (`src/flights.ts`). What to watch:
 
 - Deleting in the storage directly bypasses the registry.
 - `flightsByStorage` is module-scoped, like `installedAdapters`: with two copies
@@ -96,6 +95,10 @@ to lose that:
   other.
 - Every invalidation API on `client.retryCache` has to call `flights.detach`
   before it deletes; a new one that does not silently brings back #10.
+- `invalidateWhere` hands the predicate `entry.request` for stored entries and
+  the same fields for flights, but an entry stored without `request` (by 1.0.x,
+  or directly in the storage) passes only `key`, so a predicate on `url` alone
+  never matches it.
 
 ---
 

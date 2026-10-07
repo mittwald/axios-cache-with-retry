@@ -1,5 +1,5 @@
 import type { InternalAxiosRequestConfig } from "axios";
-import type { RetryCacheRequestKey } from "./types.js";
+import type { CachedRequest, RetryCacheRequestKey } from "./types.js";
 
 const METHODS_WITHOUT_BODY = ["get", "head"];
 
@@ -30,6 +30,16 @@ export function defaultRequestKey(
   }
 
   return [method, baseURL, url, params, data].join(" ");
+}
+
+export function describeRequest(
+  config: InternalAxiosRequestConfig,
+): CachedRequest {
+  return {
+    method: (config.method ?? "get").toLowerCase(),
+    ...(config.url === undefined ? {} : { url: config.url }),
+    ...(config.baseURL === undefined ? {} : { baseURL: config.baseURL }),
+  };
 }
 
 export function stableSerialize(value: unknown): string {

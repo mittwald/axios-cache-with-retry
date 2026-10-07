@@ -4,8 +4,10 @@ export { createMemoryStorage, MemoryRetryCacheStorage } from "./storage.js";
 export type {
   AxiosRetryCacheInstance,
   CacheEntry,
+  CachedRequest,
   CachedResponse,
   CacheOptions,
+  InvalidationTarget,
   RequestKeyContext,
   RetryCacheApi,
   RetryCacheOptions,
