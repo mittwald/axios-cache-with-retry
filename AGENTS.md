@@ -151,8 +151,8 @@ typically 429s, which is exactly where people expect their own backoff to run.
 `maxDelay` (default 30 s) bounds every delay, but not alike: a configured
 `delay` or the backoff is capped at it, while a `Retry-After` above it ends the
 retries, because a retry before the time the server asked for is expected to
-fail again. `retryDelay` signals that with `undefined`, and `withRetry` then
-returns the last outcome as if `shouldRetry` had said no.
+fail again. That check runs after `shouldRetry`, so a custom `shouldRetry` that
+returns `true` is still overridden by a long `Retry-After`.
 
 **`withRetry` turns every attempt into one outcome**, a returned response or a
 thrown error, and makes a single decision for both, because whether a failure

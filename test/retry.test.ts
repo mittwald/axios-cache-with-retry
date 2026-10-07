@@ -3,6 +3,7 @@ import type { InternalAxiosRequestConfig } from "axios";
 import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_RETRY_STATUS,
+  retryAfterExceedsMaxDelay,
   retryDelay,
   shouldRetry,
   sleep,
@@ -217,6 +218,12 @@ describe("retryDelay", () => {
   });
 
   it("ignores Retry-After when respectRetryAfter is off", async () => {
+    expect(
+      retryAfterExceedsMaxDelay(
+        context({ response: responseWith(429, { "retry-after": "3600" }) }),
+        options({ respectRetryAfter: false }),
+      ),
+    ).toBe(false);
     await expect(
       retryDelay(
         context({ response: responseWith(429, { "retry-after": "2" }) }),
@@ -266,26 +273,26 @@ describe("retryDelay", () => {
 });
 
 describe("retryDelay with maxDelay", () => {
-  it("gives up on a Retry-After of an hour", async () => {
-    await expect(
-      retryDelay(
+  it("gives up on a Retry-After of an hour", () => {
+    expect(
+      retryAfterExceedsMaxDelay(
         context({ response: responseWith(503, { "retry-after": "3600" }) }),
         options({ delay: 2_000, respectRetryAfter: true }),
       ),
-    ).resolves.toBeUndefined();
+    ).toBe(true);
   });
 
-  it("gives up on a Retry-After date two hours ahead", async () => {
-    const delay = await retryDelay(
-      context({
-        response: responseWith(503, {
-          "retry-after": new Date(Date.now() + 7_200_000).toUTCString(),
+  it("gives up on a Retry-After date two hours ahead", () => {
+    expect(
+      retryAfterExceedsMaxDelay(
+        context({
+          response: responseWith(503, {
+            "retry-after": new Date(Date.now() + 7_200_000).toUTCString(),
+          }),
         }),
-      }),
-      options({ respectRetryAfter: true }),
-    );
-
-    expect(delay).toBeUndefined();
+        options({ respectRetryAfter: true }),
+      ),
+    ).toBe(true);
   });
 
   it("caps a fixed delay and a function delay at 30s", async () => {
@@ -298,6 +305,13 @@ describe("retryDelay with maxDelay", () => {
   });
 
   it("waits for a Retry-After of exactly maxDelay", async () => {
+    const exactly = context({
+      response: responseWith(503, { "retry-after": "30" }),
+    });
+
+    expect(
+      retryAfterExceedsMaxDelay(exactly, options({ respectRetryAfter: true })),
+    ).toBe(false);
     await expect(
       retryDelay(
         context({ response: responseWith(503, { "retry-after": "30" }) }),
@@ -311,18 +325,24 @@ describe("retryDelay with maxDelay", () => {
       response: responseWith(503, { "retry-after": "2" }),
     });
 
-    await expect(
-      retryDelay(
+    expect(
+      retryAfterExceedsMaxDelay(
         retryAfter,
         options({ respectRetryAfter: true, maxDelay: 1_000 }),
       ),
-    ).resolves.toBeUndefined();
+    ).toBe(true);
     await expect(
       retryDelay(context(), options({ delay: 5_000, maxDelay: 1_000 })),
     ).resolves.toBe(1_000);
   });
 
   it("lifts the bound with maxDelay: Infinity", async () => {
+    expect(
+      retryAfterExceedsMaxDelay(
+        context({ response: responseWith(503, { "retry-after": "3600" }) }),
+        options({ respectRetryAfter: true, maxDelay: Infinity }),
+      ),
+    ).toBe(false);
     await expect(
       retryDelay(
         context({ response: responseWith(503, { "retry-after": "3600" }) }),

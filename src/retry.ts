@@ -14,6 +14,7 @@ import type {
 
 export const DEFAULT_RETRY_STATUS = [408, 425, 429, 500, 502, 503, 504];
 export const DEFAULT_MAX_DELAY = 30_000;
+const BACKOFF_CAP = 30_000;
 
 export function withRetry(
   adapter: AxiosAdapter,
@@ -44,11 +45,10 @@ export function withRetry(
         error: error instanceof Error ? error : undefined,
       };
 
-      const delay = (await shouldRetry(context, retry))
-        ? await retryDelay(context, retry)
-        : undefined;
-
-      if (delay === undefined) {
+      if (
+        !(await shouldRetry(context, retry)) ||
+        retryAfterExceedsMaxDelay(context, retry)
+      ) {
         if (response) {
           return response;
         }
@@ -56,7 +56,7 @@ export function withRetry(
         throw error;
       }
 
-      await sleep(delay, config);
+      await sleep(await retryDelay(context, retry), config);
       attempt += 1;
     }
   };
@@ -93,21 +93,37 @@ export async function shouldRetry(
   );
 }
 
-/** Resolves to `undefined` when `Retry-After` asks for more than `maxDelay` */
+/** A retry before the time the server asked for is expected to fail again */
+export function retryAfterExceedsMaxDelay(
+  context: RetryDelayContext,
+  retry: RetryOptions,
+): boolean {
+  const retryAfter = retryAfterOf(context, retry);
+
+  return retryAfter !== undefined && retryAfter > maxDelayOf(retry);
+}
+
 export async function retryDelay(
   context: RetryDelayContext,
   retry: RetryOptions,
-): Promise<number | undefined> {
-  const maxDelay = retry.maxDelay ?? DEFAULT_MAX_DELAY;
-  const retryAfter = retry.respectRetryAfter
+): Promise<number> {
+  const delay =
+    retryAfterOf(context, retry) ?? (await configuredDelay(context, retry));
+
+  return Math.min(delay, maxDelayOf(retry));
+}
+
+function retryAfterOf(
+  context: RetryDelayContext,
+  retry: RetryOptions,
+): number | undefined {
+  return retry.respectRetryAfter
     ? parseRetryAfter(context.response?.headers?.["retry-after"])
     : undefined;
+}
 
-  if (retryAfter !== undefined) {
-    return retryAfter <= maxDelay ? retryAfter : undefined;
-  }
-
-  return Math.min(await configuredDelay(context, retry), maxDelay);
+function maxDelayOf(retry: RetryOptions): number {
+  return retry.maxDelay ?? DEFAULT_MAX_DELAY;
 }
 
 async function configuredDelay(
@@ -122,7 +138,7 @@ async function configuredDelay(
     return retry.delay(context);
   }
 
-  return Math.min(100 * 2 ** Math.max(context.attempt - 1, 0), 30_000);
+  return Math.min(100 * 2 ** Math.max(context.attempt - 1, 0), BACKOFF_CAP);
 }
 
 export function sleep(
