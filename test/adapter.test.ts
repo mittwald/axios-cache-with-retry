@@ -210,6 +210,55 @@ describe("deduplication of writes", () => {
 
     expect(adapter).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps cached POSTs with different bodies apart under the default key", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return response(config, 200, config.data);
+    });
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000, methods: ["get", "post"] },
+      retry: false,
+    });
+
+    const [ada, bob] = await Promise.all([
+      client.post("/search", { query: "ada" }),
+      client.post("/search", { query: "bob" }),
+    ]);
+    const bobAgain = await client.post("/search", { query: "bob" });
+
+    expect([ada.data, bob.data, bobAgain.data]).toEqual([
+      { query: "ada" },
+      { query: "bob" },
+      { query: "bob" },
+    ]);
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats cached POSTs under one key as one request, whatever their body", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return response(config, 200, config.data);
+    });
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000, methods: ["get", "post"] },
+      retry: false,
+      requestKey: ({ config }) => `${config.method} ${config.url}`,
+    });
+
+    const [ada, bob] = await Promise.all([
+      client.post("/search", { query: "ada" }),
+      client.post("/search", { query: "bob" }),
+    ]);
+    const carol = await client.post("/search", { query: "carol" });
+
+    expect([ada.data, bob.data, carol.data]).toEqual([
+      { query: "ada" },
+      { query: "ada" },
+      { query: "ada" },
+    ]);
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("cache lifecycle", () => {
