@@ -193,6 +193,13 @@ re-`set`ting an existing key does not move it, so this is not an LRU.
 neither, `deletePrefix` throws rather than reporting zero deletions. Custom
 backends may return promises from every method (`Awaitable<T>`).
 
+**A failing storage never fails a request.** `withCache` goes through
+`readEntry` and `writeEntry`, which turn a throwing or rejecting `get` into a
+miss and a failing `set` into an uncached response: a cache that cannot store
+must not fail a request the network has answered. A throwing `shouldCache` is
+consumer code and still rejects, and `client.retryCache` passes storage errors
+on.
+
 `src/index.ts` is the entire public surface. Several helpers are exported from
 their own modules for testing convenience but are not re-exported there, and are
 not API.
