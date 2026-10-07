@@ -3,6 +3,7 @@ import axios, {
   AxiosError,
   type AxiosResponse,
   CanceledError,
+  isCancel,
 } from "axios";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -292,7 +293,7 @@ describe("deduplication of writes", () => {
 });
 
 describe("merged callers", () => {
-  it("hands every merged caller the first caller's config", async () => {
+  it("hands every merged caller its own config", async () => {
     const adapter = vi.fn<AxiosAdapter>(abortable(200, 5));
     const client = setupAxiosRetryCache(axios.create({ adapter }), {
       cache: { ttl: 10_000 },
@@ -306,11 +307,11 @@ describe("merged callers", () => {
     ]);
 
     expect(first.config.headers["x-caller"]).toBe("first");
-    expect(second.config.headers["x-caller"]).toBe("first");
+    expect(second.config.headers["x-caller"]).toBe("second");
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects merged callers with one shared error", async () => {
+  it("rejects every merged caller with its own copy of the error", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) => {
       await new Promise((resolve) => setTimeout(resolve, 5));
       throw new AxiosError("Network Error", "ERR_NETWORK", config);
@@ -331,12 +332,41 @@ describe("merged callers", () => {
     ]);
 
     expect(firstError).toBeInstanceOf(AxiosError);
-    expect(secondError).toBe(firstError);
-    expect(secondError?.config?.headers["x-caller"]).toBe("first");
+    expect(secondError).toBeInstanceOf(AxiosError);
+    expect(secondError).not.toBe(firstError);
+    expect(secondError?.message).toBe("Network Error");
+    expect(firstError?.config?.headers["x-caller"]).toBe("first");
+    expect(secondError?.config?.headers["x-caller"]).toBe("second");
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a merged caller's abort without a config", async () => {
+  it("keeps a canceled merged request a cancel for every caller", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      throw new CanceledError(undefined, config);
+    });
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 10_000 },
+      retry: false,
+      requestKey: ({ config }) => String(config.url),
+    });
+
+    const fail = (caller: string) =>
+      client
+        .get("/users", { headers: { "x-caller": caller } })
+        .catch((error: unknown) => error as AxiosError);
+    const [firstError, secondError] = await Promise.all([
+      fail("first"),
+      fail("second"),
+    ]);
+
+    expect(isCancel(firstError)).toBe(true);
+    expect(isCancel(secondError)).toBe(true);
+    expect(secondError?.config?.headers["x-caller"]).toBe("second");
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a merged caller's abort with its own config", async () => {
     const adapter = vi.fn<AxiosAdapter>(abortable(200, 50));
     const client = setupAxiosRetryCache(axios.create({ adapter }), {
       cache: { ttl: 10_000 },
@@ -356,7 +386,7 @@ describe("merged callers", () => {
     const [error] = await Promise.all([aborted, other]);
 
     expect(error).toBeInstanceOf(CanceledError);
-    expect(error.config).toBeUndefined();
+    expect(error.config?.headers["x-caller"]).toBe("first");
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 });

@@ -2,9 +2,9 @@ import {
   type AxiosAdapter,
   type AxiosResponse,
   CanceledError,
-  type GenericAbortSignal,
+  type InternalAxiosRequestConfig,
 } from "axios";
-import { cloneResponse } from "./response.js";
+import { cloneError, cloneResponse } from "./response.js";
 
 interface SharedRequest {
   promise: Promise<AxiosResponse>;
@@ -37,7 +37,7 @@ export function withDedupe(
       shared = created;
     }
 
-    return waitFor(shared, config.signal, () => {
+    return waitFor(shared, config, () => {
       if (inflight.get(key) === shared) {
         inflight.delete(key);
       }
@@ -47,9 +47,11 @@ export function withDedupe(
 
 function waitFor(
   shared: SharedRequest,
-  signal: GenericAbortSignal | undefined,
+  config: InternalAxiosRequestConfig,
   forget: () => void,
 ): Promise<AxiosResponse> {
+  const { signal } = config;
+
   shared.waiting += 1;
 
   return new Promise((resolve, reject) => {
@@ -61,7 +63,7 @@ function waitFor(
         shared.controller.abort();
       }
 
-      reject(new CanceledError());
+      reject(new CanceledError(undefined, config));
     };
 
     if (signal?.aborted) {
@@ -73,11 +75,11 @@ function waitFor(
     shared.promise.then(
       (response) => {
         signal?.removeEventListener?.("abort", abort);
-        resolve(cloneResponse(response));
+        resolve(cloneResponse(response, config));
       },
       (error: unknown) => {
         signal?.removeEventListener?.("abort", abort);
-        reject(error);
+        reject(cloneError(error, config));
       },
     );
   });

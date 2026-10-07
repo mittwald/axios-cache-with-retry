@@ -155,13 +155,22 @@ request and drops the entry, so a new caller starts fresh instead of joining a
 request that is being torn down. A `cancelToken` is still copied into the shared
 config and cancels it for everyone.
 
+**Every merged caller gets the outcome with its own `config`.** The layers
+inside the shared request only ever see the shared config (the first caller's,
+with the internal signal), and so does a custom `shouldRetry`, `shouldCache` or
+`delay`. `waitFor` puts each caller's own config back: `cloneResponse` for a
+response, `cloneError` for an axios error, and the `CanceledError` of a caller's
+own abort carries it too. `cloneError` keeps the prototype and every own
+property, so `isCancel` and `instanceof` still hold; anything that is not an
+axios error is passed on as it is.
+
 **Only 2xx responses are stored by default** because a cached 404 would hide an
 object created later, which is the read-after-write case retry is there for.
 
 **Cached and deduped responses share their `data` by reference.**
-`cloneResponse` and `responseFromCache` copy headers and config but hand out the
-same body object, so one caller mutating `response.data` mutates what the next
-cache hit or concurrent dedupe caller receives.
+`cloneResponse` and `responseFromCache` copy the headers and set the caller's
+config but hand out the same body object, so one caller mutating `response.data`
+mutates what the next cache hit or concurrent dedupe caller receives.
 
 **A cache hit flattens the headers.** The snapshot lowercases every name,
 stringifies the values and joins repeated ones with `", "`; axios then re-wraps
