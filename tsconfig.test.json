@@ -4,6 +4,7 @@
     "rootDir": ".",
     "types": ["node", "vitest/globals"]
   },
+  "exclude": [],
   "extends": "./tsconfig.json",
   "include": ["src", "test"]
 }
