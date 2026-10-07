@@ -210,3 +210,39 @@ describe("invalidation while a request is in flight", () => {
     expect(network.adapter).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("a detached request that fails", () => {
+  it("serves the entry from before invalidate with staleIfError", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let fail: (error: Error) => void = () => undefined;
+    const adapter = vi
+      .fn<AxiosAdapter>()
+      .mockImplementationOnce(async (config) => ({
+        config,
+        data: "before",
+        status: 200,
+        statusText: "OK",
+        headers: {},
+      }))
+      .mockImplementationOnce(
+        () => new Promise((_, reject) => (fail = reject)),
+      );
+    const client = setup(adapter, {
+      cache: { ttl: 1_000, staleIfError: true },
+    });
+
+    try {
+      await client.get("/tickets/1");
+      vi.setSystemTime(Date.now() + 2_000);
+      const waiting = client.get("/tickets/1");
+      await tick();
+      await client.retryCache.invalidate("get:/tickets/1");
+      fail(new Error("network down"));
+
+      expect((await waiting).data).toBe("before");
+      expect(adapter).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
