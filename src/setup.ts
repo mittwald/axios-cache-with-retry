@@ -35,16 +35,16 @@ const DEFAULT_CACHE: CacheOptions = {
   staleIfError: false,
 };
 
+const SAFE_METHODS = ["get", "head", "options"];
+
 const DEFAULT_RETRY: RetryOptions = {
   enabled: true,
   retries: 2,
-  methods: ["get", "head", "options"],
+  methods: [...SAFE_METHODS],
   retryOnStatus: DEFAULT_RETRY_STATUS,
   retryOnNetworkError: true,
   respectRetryAfter: true,
 };
-
-const SAFE_METHODS = ["get", "head", "options"];
 
 const installedAdapters = new WeakMap<AxiosInstance, AxiosAdapter>();
 
@@ -203,7 +203,7 @@ async function runOperation(input: {
         input.cacheEnabled &&
         input.cacheKey &&
         input.cache &&
-        (await shouldCache(input.cacheKey, input.config, response, input.cache))
+        (await isCacheable(input.cacheKey, input.config, response, input.cache))
       ) {
         const now = Date.now();
         await input.storage?.set(input.cacheKey, {
@@ -385,7 +385,7 @@ function definedOptions<T extends object>(
   ) as Partial<T>;
 }
 
-function shouldCache(
+function isCacheable(
   key: string,
   config: InternalAxiosRequestConfig,
   response: AxiosResponse,
