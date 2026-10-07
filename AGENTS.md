@@ -132,6 +132,11 @@ default key carries the body for every method outside `METHODS_WITHOUT_BODY` in
 may carry a body. A custom key that leaves the body out merges and caches such
 requests across bodies; the tests in "deduplication of writes" pin both sides.
 
+Headers are not part of the default key, `Authorization` included, so an
+instance shared by several users (typically on a server) needs cache and dedupe
+off or a user-aware `requestKey`. The README says so under `requestKey`; "the
+default key" in `test/adapter.test.ts` pins it.
+
 ---
 
 ## Retry

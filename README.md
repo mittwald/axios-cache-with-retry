@@ -94,6 +94,14 @@ Cache and dedupe key for a request. Defaults to method, base URL, URL, a stably
 serialized `params` and — for non-`GET`/`HEAD` — a stably serialized body.
 Returning `undefined` excludes the request from both caching and deduplication.
 
+The key alone decides what counts as the same request. Headers are not part of
+the default key, `Authorization` included, so two requests to the same URL with
+different credentials share one cache entry and, while one of them is in flight,
+one request. In a browser tab with a single user that is what you want. On a
+server, where one axios instance serves many users, it hands one user's response
+to another: there, either turn cache and dedupe off or use a `requestKey` that
+includes the user.
+
 ### `storage`
 
 Defaults to an in-memory store. Pass `createMemoryStorage({ maxEntries })` for a
