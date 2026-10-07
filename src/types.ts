@@ -67,12 +67,19 @@ export interface RetryCacheRequestOptions {
   dedupe?: boolean;
 }
 
+export interface StorageErrorContext {
+  operation: "get" | "set";
+  key: string;
+  error: unknown;
+}
+
 export interface RetryCacheOptions {
   requestKey?: RetryCacheRequestKey;
   cache?: false | Partial<CacheOptions>;
   retry?: false | Partial<RetryOptions>;
   dedupe?: boolean;
   storage?: RetryCacheStorage;
+  onStorageError?: (context: StorageErrorContext) => void;
 }
 
 export interface CachedResponse<T = unknown> {

@@ -8,6 +8,7 @@ import axios, {
 import { describe, expect, it, vi } from "vitest";
 import {
   createMemoryStorage,
+  type RetryCacheOptions,
   type RetryCacheStorage,
   setupAxiosRetryCache,
 } from "../src/index.js";
@@ -727,6 +728,89 @@ describe("cache lifecycle", () => {
 
     expect(await client.retryCache.invalidate("/users")).toBe(true);
     expect(await client.retryCache.invalidate("/users")).toBe(false);
+  });
+});
+
+describe("reporting storage errors", () => {
+  function failingStorage(): RetryCacheStorage {
+    return {
+      get: () => {
+        throw new Error("storage down");
+      },
+      set: () => Promise.reject(new Error("storage full")),
+      delete: () => false,
+      clear: () => undefined,
+    };
+  }
+
+  function setup(
+    storage: RetryCacheStorage,
+    onStorageError: RetryCacheOptions["onStorageError"],
+  ) {
+    return setupAxiosRetryCache(
+      axios.create({ adapter: async (config) => response(config, 200) }),
+      {
+        cache: { ttl: 10_000 },
+        retry: false,
+        requestKey: ({ config }) => String(config.url),
+        storage,
+        onStorageError,
+      },
+    );
+  }
+
+  it("reports a failing read and a failing write with operation, key and error", async () => {
+    const onStorageError = vi.fn();
+    const client = setup(failingStorage(), onStorageError);
+
+    const result = await client.get("/users");
+
+    expect(result.status).toBe(200);
+    expect(onStorageError.mock.calls).toEqual([
+      [{ operation: "get", key: "/users", error: new Error("storage down") }],
+      [{ operation: "set", key: "/users", error: new Error("storage full") }],
+    ]);
+  });
+
+  it("reports nothing while the storage works", async () => {
+    const onStorageError = vi.fn();
+    const client = setup(createMemoryStorage(), onStorageError);
+
+    await client.get("/users");
+    await client.get("/users");
+
+    expect(onStorageError).not.toHaveBeenCalled();
+  });
+
+  it("answers the request when the callback throws", async () => {
+    const client = setup(failingStorage(), () => {
+      throw new Error("logger down");
+    });
+
+    await expect(client.get("/users")).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("swallows a rejection of an async callback", async () => {
+    let calls = 0;
+    const onStorageError = (() => {
+      calls += 1;
+      return Promise.reject(new Error("logger down"));
+    }) as unknown as RetryCacheOptions["onStorageError"];
+    const client = setup(failingStorage(), onStorageError);
+
+    await expect(client.get("/users")).resolves.toMatchObject({ status: 200 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toBe(2);
+  });
+
+  it("leaves client.retryCache passing storage errors on, unreported", async () => {
+    const onStorageError = vi.fn();
+    const client = setup(failingStorage(), onStorageError);
+
+    await expect(client.retryCache.get("/users")).rejects.toThrow(
+      "storage down",
+    );
+    expect(onStorageError).not.toHaveBeenCalled();
   });
 });
 

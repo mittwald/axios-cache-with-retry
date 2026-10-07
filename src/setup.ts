@@ -79,6 +79,7 @@ export function setupAxiosRetryCache(
         cache,
         storage,
         flights,
+        onStorageError: options.onStorageError,
       });
     }
 

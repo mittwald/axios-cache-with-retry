@@ -5,21 +5,31 @@ import type {
 } from "axios";
 import type { Flights } from "./flights.js";
 import { responseFromCache, snapshotResponse } from "./response.js";
-import type { CacheEntry, CacheOptions, RetryCacheStorage } from "./types.js";
+import type {
+  CacheEntry,
+  CacheOptions,
+  RetryCacheOptions,
+  RetryCacheStorage,
+  StorageErrorContext,
+} from "./types.js";
 
 export interface CacheLayerOptions {
   key: string;
   cache: CacheOptions;
   storage: RetryCacheStorage;
   flights: Flights;
+  onStorageError?: RetryCacheOptions["onStorageError"];
 }
 
 export function withCache(
   adapter: AxiosAdapter,
-  { key, cache, storage, flights }: CacheLayerOptions,
+  { key, cache, storage, flights, onStorageError }: CacheLayerOptions,
 ): AxiosAdapter {
+  const report = (context: StorageErrorContext) =>
+    reportStorageError(onStorageError, context);
+
   return async (config) => {
-    const entry = await readEntry(storage, key);
+    const entry = await readEntry(storage, key, report);
 
     if (entry && isFresh(entry)) {
       return responseFromCache(entry, config);
@@ -45,12 +55,17 @@ export function withCache(
         !flight.detached
       ) {
         const now = Date.now();
-        await writeEntry(storage, key, {
+        await writeEntry(
+          storage,
           key,
-          createdAt: now,
-          expiresAt: now + cache.ttl,
-          response: snapshotResponse(response),
-        });
+          {
+            key,
+            createdAt: now,
+            expiresAt: now + cache.ttl,
+            response: snapshotResponse(response),
+          },
+          report,
+        );
       }
 
       return response;
@@ -60,13 +75,17 @@ export function withCache(
   };
 }
 
+type Report = (context: StorageErrorContext) => void;
+
 async function readEntry(
   storage: RetryCacheStorage,
   key: string,
+  report: Report,
 ): Promise<CacheEntry | undefined> {
   try {
     return await storage.get(key);
-  } catch {
+  } catch (error) {
+    report({ operation: "get", key, error });
     return undefined;
   }
 }
@@ -75,12 +94,27 @@ async function writeEntry(
   storage: RetryCacheStorage,
   key: string,
   entry: CacheEntry,
-): Promise<boolean> {
+  report: Report,
+): Promise<void> {
   try {
     await storage.set(key, entry);
-    return true;
+  } catch (error) {
+    report({ operation: "set", key, error });
+  }
+}
+
+function reportStorageError(
+  onStorageError: RetryCacheOptions["onStorageError"],
+  context: StorageErrorContext,
+): void {
+  try {
+    const result: unknown = onStorageError?.(context);
+
+    if (result instanceof Promise) {
+      result.catch(() => undefined);
+    }
   } catch {
-    return false;
+    return;
   }
 }
 
