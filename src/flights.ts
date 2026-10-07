@@ -1,4 +1,4 @@
-import type { RetryCacheStorage } from "./types.js";
+import type { InvalidationTarget, RetryCacheStorage } from "./types.js";
 
 export interface Flight {
   readonly detached: boolean;
@@ -6,6 +6,7 @@ export interface Flight {
 }
 
 interface TrackedFlight {
+  target: InvalidationTarget;
   detached: boolean;
   onDetach?: () => void;
 }
@@ -17,8 +18,9 @@ interface TrackedFlight {
 export class Flights {
   private readonly byKey = new Map<string, Set<TrackedFlight>>();
 
-  track(key: string, onDetach?: () => void): Flight {
-    const tracked: TrackedFlight = { detached: false, onDetach };
+  track(target: InvalidationTarget, onDetach?: () => void): Flight {
+    const { key } = target;
+    const tracked: TrackedFlight = { target, detached: false, onDetach };
     let flights = this.byKey.get(key);
 
     if (!flights) {
@@ -36,17 +38,20 @@ export class Flights {
     };
   }
 
-  detach(matches: (key: string) => boolean): void {
+  detach(matches: (target: InvalidationTarget) => boolean): void {
     for (const [key, flights] of this.byKey) {
-      if (!matches(key)) {
-        continue;
-      }
-
-      this.byKey.delete(key);
-
       for (const tracked of flights) {
+        if (!matches(tracked.target)) {
+          continue;
+        }
+
+        flights.delete(tracked);
         tracked.detached = true;
         tracked.onDetach?.();
+      }
+
+      if (flights.size === 0) {
+        this.byKey.delete(key);
       }
     }
   }

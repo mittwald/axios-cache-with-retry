@@ -6,6 +6,7 @@ import {
 } from "axios";
 import { raceAbort } from "./abort.js";
 import type { Flights } from "./flights.js";
+import { describeRequest } from "./key.js";
 import { cloneError, cloneResponse } from "./response.js";
 
 interface SharedRequest {
@@ -43,7 +44,10 @@ export function withDedupe(
         },
       };
 
-      const flight = flights.track(key, created.forget);
+      const flight = flights.track(
+        { key, ...describeRequest(config) },
+        created.forget,
+      );
       const land = () => {
         created.forget();
         flight.land();

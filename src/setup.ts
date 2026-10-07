@@ -1,10 +1,10 @@
 import axios, { type AxiosAdapter, type AxiosInstance } from "axios";
 import { withCache } from "./cache.js";
 import { type InflightRequests, withDedupe } from "./dedupe.js";
-import { resolveRequestKey } from "./key.js";
+import { describeRequest, resolveRequestKey } from "./key.js";
 import { snapshotResponse } from "./response.js";
 import { DEFAULT_MAX_DELAY, DEFAULT_RETRY_STATUS, withRetry } from "./retry.js";
-import { createMemoryStorage, deletePrefix } from "./storage.js";
+import { createMemoryStorage, deletePrefix, deleteWhere } from "./storage.js";
 import { flightsFor } from "./flights.js";
 import type {
   AxiosRetryCacheInstance,
@@ -104,15 +104,22 @@ export function setupAxiosRetryCache(
         expiresAt:
           now + (setOptions.ttl ?? normalizeCacheOptions(options.cache).ttl),
         response: snapshotResponse(response),
+        ...(response.config
+          ? { request: describeRequest(response.config) }
+          : {}),
       });
     },
     async invalidate(key) {
-      flights.detach((flightKey) => flightKey === key);
+      flights.detach((target) => target.key === key);
       return storage.delete(key);
     },
     async invalidatePrefix(prefix) {
-      flights.detach((flightKey) => flightKey.startsWith(prefix));
+      flights.detach((target) => target.key.startsWith(prefix));
       return deletePrefix(storage, prefix);
+    },
+    async invalidateWhere(predicate) {
+      flights.detach(predicate);
+      return deleteWhere(storage, predicate);
     },
     async clear() {
       flights.detach(() => true);

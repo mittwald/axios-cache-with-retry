@@ -89,11 +89,22 @@ export interface CachedResponse<T = unknown> {
   headers: Record<string, string>;
 }
 
+export interface CachedRequest {
+  method: string;
+  url?: string;
+  baseURL?: string;
+}
+
 export interface CacheEntry<T = unknown> {
   key: string;
   createdAt: number;
   expiresAt: number;
   response: CachedResponse<T>;
+  request?: CachedRequest;
+}
+
+export interface InvalidationTarget extends Partial<CachedRequest> {
+  key: string;
 }
 
 export interface RetryCacheStorage<T = unknown> {
@@ -114,6 +125,9 @@ export interface RetryCacheApi {
   ): Promise<void>;
   invalidate(key: string): Promise<boolean>;
   invalidatePrefix(prefix: string): Promise<number>;
+  invalidateWhere(
+    predicate: (target: InvalidationTarget) => boolean,
+  ): Promise<number>;
   clear(): Promise<void>;
 }
 
