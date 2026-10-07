@@ -1,4 +1,9 @@
-import type { AxiosResponse, InternalAxiosRequestConfig } from "axios";
+import {
+  type AxiosError,
+  type AxiosResponse,
+  type InternalAxiosRequestConfig,
+  isAxiosError,
+} from "axios";
 import type { CacheEntry, CachedResponse } from "./types.js";
 
 export function snapshotResponse(response: AxiosResponse): CachedResponse {
@@ -24,12 +29,37 @@ export function responseFromCache(
   };
 }
 
-export function cloneResponse(response: AxiosResponse): AxiosResponse {
+export function cloneResponse(
+  response: AxiosResponse,
+  config: InternalAxiosRequestConfig,
+): AxiosResponse {
   return {
     ...response,
     headers: { ...response.headers },
-    config: { ...response.config },
+    config,
   };
+}
+
+export function cloneError(
+  error: unknown,
+  config: InternalAxiosRequestConfig,
+): unknown {
+  if (!isAxiosError(error)) {
+    return error;
+  }
+
+  const clone = Object.create(
+    Object.getPrototypeOf(error) as object,
+    Object.getOwnPropertyDescriptors(error),
+  ) as AxiosError;
+
+  clone.config = config;
+
+  if (error.response) {
+    clone.response = cloneResponse(error.response, config);
+  }
+
+  return clone;
 }
 
 function normalizeHeaders(headers: unknown): Record<string, string> {

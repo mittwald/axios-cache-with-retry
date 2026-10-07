@@ -109,7 +109,8 @@ return a promise, so an async backend works as well.
 
 - **Deduplication wraps the whole operation**, retries included: concurrent
   callers with the same key wait for one shared result and each receive their
-  own shallow copy.
+  own shallow copy, carrying their own `config`. A failure reaches every caller
+  as its own copy of the error.
 - **Writes are not deduplicated.** Two concurrent writes are two intended
   operations, so each one reaches the network, whatever its key. Merged are the
   safe methods (`GET`, `HEAD`, `OPTIONS`) and the methods listed in

@@ -1,7 +1,8 @@
-import { AxiosHeaders } from "axios";
+import { AxiosError, AxiosHeaders, CanceledError, isCancel } from "axios";
 import type { AxiosResponse, InternalAxiosRequestConfig } from "axios";
 import { describe, expect, it } from "vitest";
 import {
+  cloneError,
   cloneResponse,
   responseFromCache,
   snapshotResponse,
@@ -127,21 +128,57 @@ describe("responseFromCache", () => {
 });
 
 describe("cloneResponse", () => {
-  it("gives every deduped caller its own headers and config", () => {
+  it("gives every deduped caller its own headers and its own config", () => {
     const shared = response({ headers: { etag: 'W/"1"' } });
-    const clone = cloneResponse(shared);
+    const caller = config({ url: "/users" });
+    const clone = cloneResponse(shared, caller);
 
     expect(clone).not.toBe(shared);
     expect(clone.headers).not.toBe(shared.headers);
     expect(clone.headers).toEqual(shared.headers);
-    expect(clone.config).not.toBe(shared.config);
-    expect(clone.config).toEqual(shared.config);
+    expect(clone.config).toBe(caller);
   });
 
   it("is shallow: the body stays shared between deduped callers", () => {
     const shared = response();
-    const clone = cloneResponse(shared);
+    const clone = cloneResponse(shared, config());
 
     expect(clone.data).toBe(shared.data);
+  });
+});
+
+describe("cloneError", () => {
+  it("copies an axios error for the caller and keeps its class", () => {
+    const shared = new CanceledError("canceled", config({ url: "/shared" }));
+    const caller = config({ url: "/users" });
+    const clone = cloneError(shared, caller);
+
+    expect(clone).not.toBe(shared);
+    expect(clone).toBeInstanceOf(CanceledError);
+    expect(isCancel(clone)).toBe(true);
+    expect(clone).toMatchObject({ message: "canceled", config: caller });
+    expect(shared.config?.url).toBe("/shared");
+  });
+
+  it("gives the caller its own copy of the error response", () => {
+    const failed = response({ status: 404 });
+    const shared = new AxiosError(
+      "Not Found",
+      "ERR_BAD_REQUEST",
+      failed.config,
+    );
+    shared.response = failed;
+    const caller = config({ url: "/users" });
+    const clone = cloneError(shared, caller) as AxiosError;
+
+    expect(clone.response).not.toBe(failed);
+    expect(clone.response?.status).toBe(404);
+    expect(clone.response?.config).toBe(caller);
+  });
+
+  it("hands back anything that is not an axios error unchanged", () => {
+    const error = new Error("storage down");
+
+    expect(cloneError(error, config())).toBe(error);
   });
 });
