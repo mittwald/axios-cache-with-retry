@@ -62,6 +62,27 @@ describe("MemoryRetryCacheStorage", () => {
     expect(Array.from(storage.keys())).toEqual(["b", "c"]);
   });
 
+  it("does not make a key younger when it is read", () => {
+    const storage = createMemoryStorage({ maxEntries: 2 });
+
+    storage.set("a", entry("a"));
+    storage.set("b", entry("b"));
+    storage.get("a");
+    storage.set("c", entry("c"));
+
+    expect(Array.from(storage.keys())).toEqual(["b", "c"]);
+  });
+
+  it("keeps more than 1024 entries without maxEntries", () => {
+    const storage = createMemoryStorage();
+
+    for (let index = 0; index < 2000; index += 1) {
+      storage.set(String(index), entry(String(index)));
+    }
+
+    expect(Array.from(storage.keys())).toHaveLength(2000);
+  });
+
   it("is unbounded without maxEntries", () => {
     const storage = createMemoryStorage();
 
