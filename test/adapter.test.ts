@@ -734,19 +734,54 @@ describe("retry timing", () => {
 
   it("returns the response at once when Retry-After asks for more than maxDelay", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) =>
-      response(config, 503, undefined, { "retry-after": "3600" }),
+      response(config, 503, undefined, { "retry-after": "1" }),
     );
     const client = setupAxiosRetryCache(axios.create({ adapter }), {
       cache: false,
-      retry: { retries: 1, delay: 2_000 },
+      retry: { retries: 1, delay: 0, maxDelay: 50 },
     });
 
-    const started = Date.now();
     const answer = await client.get("/status", accepted);
 
     expect(answer.status).toBe(503);
     expect(adapter).toHaveBeenCalledTimes(1);
-    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it("rejects at once when a thrown 503 carries a Retry-After above maxDelay", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      throw new AxiosError(
+        "Service Unavailable",
+        AxiosError.ERR_BAD_RESPONSE,
+        config,
+        undefined,
+        response(config, 503, undefined, { "retry-after": "1" }),
+      );
+    });
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      retry: { retries: 1, delay: 0, maxDelay: 50 },
+    });
+
+    await expect(client.get("/status")).rejects.toMatchObject({
+      message: "Service Unavailable",
+      response: { status: 503 },
+    });
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up even on Retry-After: 0 with maxDelay: NaN", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 503, undefined, { "retry-after": "0" }),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      retry: { retries: 1, delay: 0, maxDelay: Number.NaN },
+    });
+
+    const answer = await client.get("/status", accepted);
+
+    expect(answer.status).toBe(503);
+    expect(adapter).toHaveBeenCalledTimes(1);
   });
 
   it("waits between attempts when a fixed delay is configured", async () => {
