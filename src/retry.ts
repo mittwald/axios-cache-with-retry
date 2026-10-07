@@ -3,7 +3,7 @@ import {
   type AxiosError,
   type AxiosResponse,
   CanceledError,
-  type GenericAbortSignal,
+  type InternalAxiosRequestConfig,
   isCancel,
 } from "axios";
 import type {
@@ -56,7 +56,7 @@ export function withRetry(
         return outcome.response;
       }
 
-      await sleep(await retryDelay(context, retry), config.signal);
+      await sleep(await retryDelay(context, retry), config);
       attempt += 1;
     }
   };
@@ -116,9 +116,14 @@ export async function retryDelay(
   return Math.min(100 * 2 ** Math.max(context.attempt - 1, 0), 30_000);
 }
 
-export function sleep(ms: number, signal?: GenericAbortSignal): Promise<void> {
+export function sleep(
+  ms: number,
+  config: InternalAxiosRequestConfig,
+): Promise<void> {
+  const { signal } = config;
+
   if (signal?.aborted) {
-    return Promise.reject(new CanceledError());
+    return Promise.reject(new CanceledError(undefined, config));
   }
 
   if (ms <= 0) {
@@ -128,7 +133,7 @@ export function sleep(ms: number, signal?: GenericAbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const abort = () => {
       clearTimeout(timer);
-      reject(new CanceledError());
+      reject(new CanceledError(undefined, config));
     };
     const timer = setTimeout(() => {
       signal?.removeEventListener?.("abort", abort);

@@ -270,8 +270,8 @@ describe("sleep", () => {
     vi.useFakeTimers();
 
     try {
-      await expect(sleep(0)).resolves.toBeUndefined();
-      await expect(sleep(-1)).resolves.toBeUndefined();
+      await expect(sleep(0, config())).resolves.toBeUndefined();
+      await expect(sleep(-1, config())).resolves.toBeUndefined();
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
@@ -280,7 +280,7 @@ describe("sleep", () => {
 
   it("waits for the given duration", async () => {
     const started = Date.now();
-    await sleep(15);
+    await sleep(15, config());
 
     expect(Date.now() - started).toBeGreaterThanOrEqual(10);
   });
@@ -290,7 +290,7 @@ describe("sleep", () => {
     const controller = new AbortController();
 
     try {
-      const sleeping = sleep(10_000, controller.signal);
+      const sleeping = sleep(10_000, config({ signal: controller.signal }));
       controller.abort();
 
       await expect(sleeping).rejects.toMatchObject({ code: "ERR_CANCELED" });
@@ -298,5 +298,20 @@ describe("sleep", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("hands the request's config to its abort error", async () => {
+    const controller = new AbortController();
+    const request = config({ url: "/users", signal: controller.signal });
+    const sleeping = sleep(10_000, request);
+
+    controller.abort();
+    const error = await sleeping.catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(CanceledError);
+    expect((error as CanceledError<unknown>).config).toBe(request);
+    await expect(sleep(0, request)).rejects.toMatchObject({
+      config: request,
+    });
   });
 });

@@ -786,7 +786,7 @@ describe("aborting", () => {
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects an abort during the retry delay without a config", async () => {
+  it("rejects an abort during the retry delay with the request's config", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) =>
       response(config, 503),
     );
@@ -804,11 +804,11 @@ describe("aborting", () => {
     const error = await request;
 
     expect(error).toBeInstanceOf(CanceledError);
-    expect(error.config).toBeUndefined();
+    expect(error.config?.url).toBe("/users");
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects at the retry delay without a config once an attempt saw the abort", async () => {
+  it("rejects at the retry delay with the request's config once an attempt saw the abort", async () => {
     const controller = new AbortController();
     const adapter = vi.fn<AxiosAdapter>(async (config) => {
       controller.abort();
@@ -825,7 +825,7 @@ describe("aborting", () => {
       .catch((caught: unknown) => caught as AxiosError);
 
     expect(error).toBeInstanceOf(CanceledError);
-    expect(error.config).toBeUndefined();
+    expect(error.config?.url).toBe("/users");
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
