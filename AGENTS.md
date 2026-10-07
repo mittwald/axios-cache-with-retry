@@ -130,8 +130,10 @@ requests across bodies; the tests in "deduplication of writes" pin both sides.
 means up to three calls in total. The cap is enforced _before_ a custom
 `shouldRetry` is consulted: a custom predicate replaces the method and status
 checks, never the attempt budget. A cancellation (`isCancel`) ends the retries
-the same way, and the delay listens to the request's `signal`, so an abort never
-waits for the next attempt.
+the same way, and the delay listens to the request's `signal` (with dedupe: the
+shared one, which aborts once every caller has aborted), so an abort never waits
+for the next attempt. The delay rejects with a `CanceledError` that carries the
+request's config, as the ones from axios' own adapters do.
 
 `retryDelay` checks `Retry-After` first when `respectRetryAfter` is on, so a
 configured `delay` function is skipped for any response carrying that header —
