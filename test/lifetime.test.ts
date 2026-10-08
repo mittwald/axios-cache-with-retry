@@ -173,6 +173,27 @@ describe("expired entries", () => {
     });
   });
 
+  it("does not report a failing delete of an expired entry", async () => {
+    const { adapter } = network();
+    const storage = createMemoryStorage();
+    storage.delete = () => {
+      throw new Error("storage down");
+    };
+    const onStorageError = vi.fn();
+    const client = setup(adapter, {
+      storage,
+      cache: { ttl: MINUTE },
+      onStorageError,
+    });
+
+    await client.get("/tickets/1");
+    vi.setSystemTime(2 * MINUTE);
+    await client.get("/tickets/1");
+
+    expect(onStorageError).not.toHaveBeenCalled();
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
   it("answers a request when deleting an expired entry fails", async () => {
     const { adapter } = network();
     const storage = createMemoryStorage();
