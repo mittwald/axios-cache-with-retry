@@ -1,7 +1,30 @@
 # @mittwald/axios-cache-with-retry
 
 Cache, retry and merging of identical requests for Axios, in one adapter, so the
-three don't trip over each other.
+three don't trip over each other. Built by [mittwald](https://www.mittwald.de).
+
+[![npm](https://img.shields.io/npm/v/@mittwald/axios-cache-with-retry?logo=npm&color=cb0000)](https://www.npmjs.com/package/@mittwald/axios-cache-with-retry)
+[![Tests](https://img.shields.io/github/actions/workflow/status/mittwald/axios-cache-with-retry/test.yml?branch=main&logo=github&label=tests)](https://github.com/mittwald/axios-cache-with-retry/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![axios ^1](https://img.shields.io/badge/axios-%5E1-5a29e4.svg?logo=axios&logoColor=white)](https://axios-http.com)
+[![Types included](https://img.shields.io/badge/types-included-3178c6.svg?logo=typescript&logoColor=white)](src/types.ts)
+[![Dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
+
+- 📦 **npm:** <https://www.npmjs.com/package/@mittwald/axios-cache-with-retry>
+- 📝 **Release notes:**
+  <https://github.com/mittwald/axios-cache-with-retry/releases>
+- 🐛 **Issues:** <https://github.com/mittwald/axios-cache-with-retry/issues>
+
+## Highlights
+
+- 🗄️ **Cache** with a TTL, an optional fallback to expired answers while the
+  backend is down, and a bounded in-memory store.
+- 🔁 **Retry** with growing pauses, `Retry-After` support and an upper bound.
+- 🤝 **Merging** of identical requests that run at the same time.
+- 🧹 **Invalidation** by key, prefix or URL that also reaches requests still on
+  their way.
+- 🧩 **One adapter** instead of three interceptors, so a retry never runs
+  through the cache again and `validateStatus` doesn't change what gets retried.
 
 ## Quick start
 
