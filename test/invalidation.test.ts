@@ -266,6 +266,7 @@ describe("stored entries", () => {
       "key",
       "request",
       "response",
+      "staleUntil",
     ]);
     expect(entry?.request).toEqual({
       method: "get",

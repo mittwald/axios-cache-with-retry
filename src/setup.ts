@@ -1,5 +1,5 @@
 import axios, { type AxiosAdapter, type AxiosInstance } from "axios";
-import { withCache } from "./cache.js";
+import { entryLifetime, withCache } from "./cache.js";
 import { type InflightRequests, withDedupe } from "./dedupe.js";
 import { describeRequest, resolveRequestKey } from "./key.js";
 import { snapshotResponse } from "./response.js";
@@ -97,12 +97,10 @@ export function setupAxiosRetryCache(
       return storage.get(key);
     },
     async set(key, response, setOptions = {}) {
-      const now = Date.now();
+      const cache = normalizeCacheOptions(options.cache);
       await storage.set(key, {
         key,
-        createdAt: now,
-        expiresAt:
-          now + (setOptions.ttl ?? normalizeCacheOptions(options.cache).ttl),
+        ...entryLifetime(cache, setOptions.ttl),
         response: snapshotResponse(response),
         ...(response.config
           ? { request: describeRequest(response.config) }

@@ -210,25 +210,31 @@ indexes `headers["retry-after"]` in lowercase — the retry decision runs inside
 the adapter, before axios normalizes anything, and relies on the adapter
 delivering lowercased names (node's `http` and the xhr adapter both do).
 
-**Nothing evicts on expiry.** `isFresh` is a read-time comparison; expired
-entries are deliberately kept so `staleIfError` can serve them after retries are
-exhausted. Bounding growth is the storage's job, and
-`createMemoryStorage({ maxEntries })` drops keys in `Map` insertion order —
-re-`set`ting an existing key does not move it, so this is not an LRU.
+**Expired is not dead.** `isFresh` is a read-time comparison; an expired entry
+stays so `staleIfError` can serve it after retries are exhausted. What ends an
+entry is `staleUntil`, set by `entryLifetime` in `src/cache.ts` from the options
+of the writing request: equal to `expiresAt` without `staleIfError`,
+`expiresAt + maxStaleAge` with it, absent (no limit, as for entries written by
+1.0.x) when `maxStaleAge` is unset. `withCache` deletes a dead entry when it
+reads one and never serves it stale. Entries nobody reads again are the
+storage's job: `createMemoryStorage` sweeps dead entries on the first `set`
+after `sweepInterval`, and `maxEntries` (default 1024) evicts the least recently
+used key, since `get` and `set` move a key to the end of the `Map`.
 
 `invalidatePrefix` needs a storage implementing `deletePrefix` or `keys`; with
 neither, `deletePrefix` throws rather than reporting zero deletions. Custom
 backends may return promises from every method (`Awaitable<T>`).
 
 **A failing storage never fails a request.** `withCache` goes through
-`readEntry` and `writeEntry`, which turn a throwing or rejecting `get` into a
-miss and a failing `set` into an uncached response: a cache that cannot store
-must not fail a request the network has answered. A throwing `shouldCache` is
-consumer code and still rejects, and `client.retryCache` passes storage errors
-on. Both helpers hand what they swallow to `onStorageError` through
-`reportStorageError`, which swallows the callback's own errors and rejections,
-so observing cannot fail a request either. `client.retryCache` does not report:
-its caller already gets the error.
+`readEntry`, `writeEntry` and `deleteEntry`, which turn a throwing or rejecting
+`get` into a miss, a failing `set` into an uncached response and a failing
+`delete` of a dead entry into one that stays (it is skipped on the next read as
+well): a cache that cannot store must not fail a request the network has
+answered. A throwing `shouldCache` is consumer code and still rejects, and
+`client.retryCache` passes storage errors on. All three hand what they swallow
+to `onStorageError` through `reportStorageError`, which swallows the callback's
+own errors and rejections, so observing cannot fail a request either.
+`client.retryCache` does not report: its caller already gets the error.
 
 `src/index.ts` is the entire public surface. Several helpers are exported from
 their own modules for testing convenience but are not re-exported there, and are

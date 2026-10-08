@@ -30,7 +30,12 @@ export function withCache(
     reportStorageError(onStorageError, context);
 
   return async (config) => {
-    const entry = await readEntry(storage, key, report);
+    let entry = await readEntry(storage, key, report);
+
+    if (entry && isDead(entry)) {
+      await deleteEntry(storage, key, report);
+      entry = undefined;
+    }
 
     if (entry && isFresh(entry)) {
       return responseFromCache(entry, config);
@@ -45,7 +50,7 @@ export function withCache(
       try {
         response = await adapter(config);
       } catch (error) {
-        if (cache.staleIfError && entry && !flight.detached) {
+        if (cache.staleIfError && entry && !flight.detached && !isDead(entry)) {
           return responseFromCache(entry, config);
         }
 
@@ -56,14 +61,12 @@ export function withCache(
         (await isCacheable(key, config, response, cache)) &&
         !flight.detached
       ) {
-        const now = Date.now();
         await writeEntry(
           storage,
           key,
           {
             key,
-            createdAt: now,
-            expiresAt: now + cache.ttl,
+            ...entryLifetime(cache),
             response: snapshotResponse(response),
             request,
           },
@@ -90,6 +93,18 @@ async function readEntry(
   } catch (error) {
     report({ operation: "get", key, error });
     return undefined;
+  }
+}
+
+async function deleteEntry(
+  storage: RetryCacheStorage,
+  key: string,
+  report: Report,
+): Promise<void> {
+  try {
+    await storage.delete(key);
+  } catch (error) {
+    report({ operation: "delete", key, error });
   }
 }
 
@@ -135,4 +150,26 @@ function isCacheable(
 
 export function isFresh(entry: CacheEntry): boolean {
   return entry.expiresAt > Date.now();
+}
+
+export function isDead(entry: CacheEntry, now = Date.now()): boolean {
+  return entry.staleUntil !== undefined && entry.staleUntil <= now;
+}
+
+export function entryLifetime(
+  cache: CacheOptions,
+  ttl = cache.ttl,
+): Pick<CacheEntry, "createdAt" | "expiresAt" | "staleUntil"> {
+  const createdAt = Date.now();
+  const expiresAt = createdAt + ttl;
+
+  if (!cache.staleIfError) {
+    return { createdAt, expiresAt, staleUntil: expiresAt };
+  }
+
+  if (cache.maxStaleAge === undefined) {
+    return { createdAt, expiresAt };
+  }
+
+  return { createdAt, expiresAt, staleUntil: expiresAt + cache.maxStaleAge };
 }
