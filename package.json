@@ -17,7 +17,10 @@
     "retry"
   ],
   "homepage": "https://github.com/mittwald/axios-cache-with-retry#readme",
-  "repository": "github:mittwald/axios-cache-with-retry",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mittwald/axios-cache-with-retry.git"
+  },
   "license": "MIT",
   "exports": {
     ".": {
