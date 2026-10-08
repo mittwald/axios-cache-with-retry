@@ -69,7 +69,7 @@ export interface RetryCacheRequestOptions {
 }
 
 export interface StorageErrorContext {
-  operation: "get" | "set";
+  operation: "get" | "set" | "delete";
   key: string;
   error: unknown;
 }

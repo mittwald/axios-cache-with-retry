@@ -173,7 +173,7 @@ describe("expired entries", () => {
     });
   });
 
-  it("does not report a failing delete of an expired entry", async () => {
+  it("reports a failing delete of an expired entry", async () => {
     const { adapter } = network();
     const storage = createMemoryStorage();
     storage.delete = () => {
@@ -190,7 +190,11 @@ describe("expired entries", () => {
     vi.setSystemTime(2 * MINUTE);
     await client.get("/tickets/1");
 
-    expect(onStorageError).not.toHaveBeenCalled();
+    expect(onStorageError).toHaveBeenCalledExactlyOnceWith({
+      operation: "delete",
+      key: "get:/tickets/1",
+      error: new Error("storage down"),
+    });
     expect(adapter).toHaveBeenCalledTimes(2);
   });
 

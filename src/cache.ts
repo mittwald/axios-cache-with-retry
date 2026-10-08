@@ -33,7 +33,7 @@ export function withCache(
     let entry = await readEntry(storage, key, report);
 
     if (entry && isDead(entry)) {
-      await deleteEntry(storage, key);
+      await deleteEntry(storage, key, report);
       entry = undefined;
     }
 
@@ -99,11 +99,12 @@ async function readEntry(
 async function deleteEntry(
   storage: RetryCacheStorage,
   key: string,
+  report: Report,
 ): Promise<void> {
   try {
     await storage.delete(key);
-  } catch {
-    // a dead entry that stays is skipped on the next read as well
+  } catch (error) {
+    report({ operation: "delete", key, error });
   }
 }
 

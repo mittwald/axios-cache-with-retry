@@ -226,14 +226,15 @@ neither, `deletePrefix` throws rather than reporting zero deletions. Custom
 backends may return promises from every method (`Awaitable<T>`).
 
 **A failing storage never fails a request.** `withCache` goes through
-`readEntry` and `writeEntry`, which turn a throwing or rejecting `get` into a
-miss and a failing `set` into an uncached response: a cache that cannot store
-must not fail a request the network has answered. A throwing `shouldCache` is
-consumer code and still rejects, and `client.retryCache` passes storage errors
-on. Both helpers hand what they swallow to `onStorageError` through
-`reportStorageError`, which swallows the callback's own errors and rejections,
-so observing cannot fail a request either. `client.retryCache` does not report:
-its caller already gets the error.
+`readEntry`, `writeEntry` and `deleteEntry`, which turn a throwing or rejecting
+`get` into a miss, a failing `set` into an uncached response and a failing
+`delete` of a dead entry into one that stays (it is skipped on the next read as
+well): a cache that cannot store must not fail a request the network has
+answered. A throwing `shouldCache` is consumer code and still rejects, and
+`client.retryCache` passes storage errors on. All three hand what they swallow
+to `onStorageError` through `reportStorageError`, which swallows the callback's
+own errors and rejections, so observing cannot fail a request either.
+`client.retryCache` does not report: its caller already gets the error.
 
 `src/index.ts` is the entire public surface. Several helpers are exported from
 their own modules for testing convenience but are not re-exported there, and are

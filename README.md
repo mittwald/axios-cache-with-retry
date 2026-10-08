@@ -149,9 +149,10 @@ setupAxiosRetryCache(instance, {
 });
 ```
 
-`operation` is `"get"` or `"set"`. The callback only observes: the request
-behaves the same with or without it, and an error the callback throws, or a
-promise it returns that rejects, is swallowed as well.
+`operation` is `"get"`, `"set"` or `"delete"` (a dead entry that a request could
+not remove). The callback only observes: the request behaves the same with or
+without it, and an error the callback throws, or a promise it returns that
+rejects, is swallowed as well.
 
 ## Cache API
 
