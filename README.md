@@ -1,18 +1,32 @@
 # @mittwald/axios-cache-with-retry
 
-Coordinated retry, cache and in-flight dedupe for Axios — as a single adapter
-rather than three interceptors that each re-run the request behind each other's
-back.
+Cache, retry and merging of identical requests for Axios, in one adapter, so the
+three don't trip over each other. Built by [mittwald](https://www.mittwald.de).
 
-Retry and caching cannot be composed out of separate interceptors: a retry is a
-second dispatch, so it re-enters the interceptor chain and every layer around it
-sees a request the caller never made. Combining `axios-retry` with
-`axios-cache-interceptor` therefore multiplies requests instead of deduplicating
-them, and which of the two even gets to see a failure depends on
-`validateStatus`. [Why this exists](#why-this-exists) walks through a concrete
-example.
+[![npm](https://img.shields.io/npm/v/@mittwald/axios-cache-with-retry?logo=npm&color=cb0000)](https://www.npmjs.com/package/@mittwald/axios-cache-with-retry)
+[![Tests](https://img.shields.io/github/actions/workflow/status/mittwald/axios-cache-with-retry/test.yml?branch=main&logo=github&label=tests)](https://github.com/mittwald/axios-cache-with-retry/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![axios ^1](https://img.shields.io/badge/axios-%5E1-5a29e4.svg?logo=axios&logoColor=white)](https://axios-http.com)
+[![Types included](https://img.shields.io/badge/types-included-3178c6.svg?logo=typescript&logoColor=white)](src/types.ts)
+[![Dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](package.json)
 
-## Installation
+- 📦 **npm:** <https://www.npmjs.com/package/@mittwald/axios-cache-with-retry>
+- 📝 **Release notes:**
+  <https://github.com/mittwald/axios-cache-with-retry/releases>
+- 🐛 **Issues:** <https://github.com/mittwald/axios-cache-with-retry/issues>
+
+## Highlights
+
+- 🗄️ **Cache** with a TTL, an optional fallback to expired answers while the
+  backend is down, and a bounded in-memory store.
+- 🔁 **Retry** with growing pauses, `Retry-After` support and an upper bound.
+- 🤝 **Merging** of identical requests that run at the same time.
+- 🧹 **Invalidation** by key, prefix or URL that also reaches requests still on
+  their way.
+- 🧩 **One adapter** instead of three interceptors, so a retry never runs
+  through the cache again and `validateStatus` doesn't change what gets retried.
+
+## Quick start
 
 ```bash
 npm install @mittwald/axios-cache-with-retry
@@ -20,270 +34,366 @@ npm install @mittwald/axios-cache-with-retry
 
 `axios` is a peer dependency (`^1`).
 
-## Usage
-
 ```ts
 import axios from "axios";
 import { setupAxiosRetryCache } from "@mittwald/axios-cache-with-retry";
 
-const client = setupAxiosRetryCache(axios.create(), {
-  requestKey: ({ config }) => `${config.method ?? "get"}:${config.url}`,
-  cache: { ttl: 60_000, staleIfError: true },
-  retry: { retries: 3, retryOnStatus: [408, 429, 500, 502, 503, 504] },
-});
+const client = setupAxiosRetryCache(axios.create({ baseURL: "/api" }));
 
-await client.get("/users");
-await client.retryCache.invalidate("get:/users");
+await client.get("/users"); // goes to the network
+await client.get("/users"); // answered from the cache for the next 60 s
 ```
 
-The retry decision is made for thrown Axios errors and for regular responses
-alike, so it keeps working under `validateStatus: () => true`.
+That is all it takes for sensible defaults:
 
-`setupAxiosRetryCache` replaces the instance's adapter and returns the same
-instance, typed with an added `retryCache` property. Calling it twice on one
-instance re-wraps the original adapter rather than stacking two layers.
+- `GET` and `HEAD` responses with a 2xx status are cached for 60 seconds, in
+  memory, for at most 1024 different requests.
+- Identical requests that run at the same time are sent once and share the
+  answer.
+- `GET`, `HEAD` and `OPTIONS` are retried twice on network errors and on 408,
+  425, 429 and 5xx, with growing pauses (or as long as `Retry-After` says, up to
+  30 s).
 
-## Per-request options
+`setupAxiosRetryCache` returns the same instance with an added `retryCache`
+property for managing the cache.
 
-Every request config accepts a `retryCache` field that overrides the global
-options for that one request. The module augments Axios' own
-`AxiosRequestConfig`, so the field is typed wherever `axios` is.
+## What happens to a request
+
+1. **A key is built** from method, base URL, URL, `params` and, for methods
+   other than `GET` and `HEAD`, the body. Requests with the same key count as
+   the same request. Headers are not part of the key.
+2. **Fresh entry in the cache?** Then that is the answer, no request is sent.
+3. **The same request already running?** Then this caller waits for it and gets
+   its own copy of the result. This only happens for reads (`GET`, `HEAD`,
+   `OPTIONS` and methods listed in `cache.methods`); writes are always sent.
+4. **Otherwise the request is sent**, and retried if the method and the outcome
+   allow it.
+5. **The final answer is stored** if it is a 2xx and the method is cached. If
+   every attempt failed and `staleIfError` is on, an expired entry is returned
+   instead of the error.
+
+## Recipes
+
+### A browser app with server-side change events
+
+Cache reads, and throw away what the server says has changed. `invalidateWhere`
+matches on the URL, so you don't have to know how keys are built:
 
 ```ts
+const client = setupAxiosRetryCache(axios.create({ baseURL: "/api" }), {
+  cache: { ttl: 5 * 60_000 },
+});
+
+events.on("changed", async (path: string) => {
+  await client.retryCache.invalidateWhere(
+    ({ url }) => url?.startsWith(path) ?? false,
+  );
+});
+
+await client.get("/tickets/1"); // request, answer cached for 5 minutes
+await client.get("/tickets/1"); // from the cache, no request
+// the server reports a change: events.emit("changed", "/tickets/")
+await client.get("/tickets/1"); // request again, the new answer is cached
+```
+
+An invalidation also reaches requests that are still running: the next caller
+starts a fresh request instead of waiting for one that began before the change,
+and the old answer is not stored.
+
+### A server that serves many users
+
+The default key ignores headers, so on a shared instance user B could get user
+A's cached answer. Keep only the retries:
+
+```ts
+const client = setupAxiosRetryCache(axios.create(), {
+  cache: false,
+  dedupe: false,
+});
+
+// at the same time, for two users:
+client.get("/me", { headers: { Authorization: aliceToken } }); // request
+client.get("/me", { headers: { Authorization: bobToken } }); // its own request
+```
+
+If you do want a cache there, put the user into the key (see
+[Logout and per-user data](#logout-and-per-user-data)).
+
+### Objects that appear a moment after they were created
+
+Some backends create objects asynchronously, so a read right after a write can
+answer 404 for a short time. Retry those quickly, and give up fast when the 404
+is real:
+
+```ts
+const client = setupAxiosRetryCache(axios.create(), {
+  retry: {
+    retries: 2,
+    shouldRetry: ({ response }) => response?.status === 404,
+    delay: ({ attempt }) => attempt ** 2 * 100,
+  },
+});
+
+await client.post("/tickets", { title: "Printer jam" }); // 201, id 7
+await client.get("/tickets/7");
+// GET → 404, wait 100 ms
+// GET → 404, wait 400 ms
+// GET → 200, answer returned and cached
+
+await client.get("/tickets/8"); // never created
+// GET → 404, wait 100 ms, GET → 404, wait 400 ms, GET → 404:
+// rejects with the 404 after about half a second
+```
+
+`shouldRetry` replaces the built-in decision (methods, status codes, network
+errors), so it applies to every method here.
+
+### Keep working while the backend is down
+
+`ttl` is how long an answer is used without asking the server again.
+`maxStaleAge` is how much longer an expired answer may stand in when the server
+cannot be reached:
+
+```ts
+const client = setupAxiosRetryCache(axios.create(), {
+  cache: { ttl: 5 * 60_000, staleIfError: true, maxStaleAge: 60 * 60_000 },
+});
+
+await client.get("/status"); // request, answer cached
+// after 3 minutes:
+await client.get("/status"); // from the cache, no request
+// after 10 minutes, the server is down:
+await client.get("/status"); // request and both retries fail: the old answer
+// after 70 minutes, the server is still down:
+await client.get("/status"); // too old: rejects with the error, entry deleted
+```
+
+While the server is up, every request after the first 5 minutes simply fetches
+and caches a new answer.
+
+### A search sent as POST
+
+`POST` is neither cached nor merged by default. Opt in for the one request that
+is really a read; the default key includes the body, so different searches stay
+apart:
+
+```ts
+const search = (query: string) =>
+  client.post(
+    "/search",
+    { query },
+    { retryCache: { cache: { methods: ["post"] } } },
+  );
+
+await search("invoices"); // request, answer cached
+await search("invoices"); // from the cache, no request
+await search("tickets"); // different body: request
+await Promise.all([search("orders"), search("orders")]); // one request
+```
+
+If you write your own `requestKey`, include the body for such requests, or two
+different searches get the same answer.
+
+### Logout and per-user data
+
+Clear the cache when the user changes, so nothing from the previous user is
+shown. Responses that are still on their way are not stored either:
+
+```ts
+await client.get("/me"); // Alice: request, answer cached
+await client.retryCache.clear(); // on logout
+await client.get("/me"); // Bob: request, never Alice's answer
+```
+
+To keep several users apart in one cache, build on the default key:
+
+```ts
+import { defaultRequestKey } from "@mittwald/axios-cache-with-retry";
+
+const client = setupAxiosRetryCache(axios.create(), {
+  requestKey: ({ config }) => {
+    const key = defaultRequestKey(config);
+    return key && `${currentUserId()} ${key}`;
+  },
+});
+
+await client.get("/me"); // Alice: request, cached under Alice's key
+await client.get("/me"); // Bob: request, cached under Bob's key
+await client.get("/me"); // Alice again: from her entry, no request
+```
+
+Returning `undefined` from `requestKey` excludes a request from cache and
+merging.
+
+### Opting single requests out
+
+```ts
+// up to 5 retries instead of 2
 await client.get("/users", { retryCache: { retry: { retries: 5 } } });
+// never cached, but still retried and merged with a parallel call
 await client.get("/metrics", { retryCache: { cache: false } });
+// never merged with a parallel call, but still cached
+await client.get("/live", { retryCache: { dedupe: false } });
+// straight to the network: no cache, no merging, no retry
 await client.get("/raw", { retryCache: false });
 ```
 
-| Value               | Effect                                           |
-| ------------------- | ------------------------------------------------ |
-| `false`             | Bypasses the adapter entirely                    |
-| `true`              | Enables cache and retry with the global settings |
-| `{ cache, retry }`  | Merges into the global settings for this request |
-| `{ dedupe: false }` | Opts this request out of in-flight deduplication |
+### Your own storage, with error reporting
 
-## Options
-
-### `cache`
-
-| Option         | Default          | Description                                                  |
-| -------------- | ---------------- | ------------------------------------------------------------ |
-| `enabled`      | `true`           | Set to `false` to keep the cache off until a request opts in |
-| `ttl`          | `60000`          | Lifetime of an entry in milliseconds                         |
-| `methods`      | `["get","head"]` | Methods whose responses are cached                           |
-| `staleIfError` | `false`          | Serve an expired entry once retries are exhausted            |
-| `maxStaleAge`  | unlimited        | How long after expiry `staleIfError` may serve an entry, ms  |
-| `shouldCache`  | 2xx status       | Predicate deciding whether a response is stored              |
-
-### `retry`
-
-| Option                | Default                             | Description                                                                                         |
-| --------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `enabled`             | `true`                              | Set to `false` to keep retry off until a request opts in                                            |
-| `retries`             | `2`                                 | Attempts after the initial one                                                                      |
-| `methods`             | `["get","head","options"]`          | Methods that may be retried                                                                         |
-| `retryOnStatus`       | `408, 425, 429, 500, 502, 503, 504` | Status codes that trigger a retry                                                                   |
-| `retryOnNetworkError` | `true`                              | Retry errors that never produced a response                                                         |
-| `respectRetryAfter`   | `true`                              | Honour a `Retry-After` response header                                                              |
-| `delay`               | exponential, capped at 30 s         | Fixed milliseconds or a function; the backoff stays at 30 s even with a larger `maxDelay`           |
-| `maxDelay`            | `30000`                             | Upper bound for every delay, `Infinity` for none; anything but a number >= 0 throws                 |
-| `shouldRetry`         | —                                   | Replaces the built-in decision, except that a `Retry-After` above `maxDelay` still ends the retries |
-
-### `requestKey`
-
-Cache and dedupe key for a request. Defaults to method, base URL, URL, a stably
-serialized `params` and — for non-`GET`/`HEAD` — a stably serialized body.
-Returning `undefined` excludes the request from both caching and deduplication.
-
-The key alone decides what counts as the same request. Headers are not part of
-the default key, `Authorization` included, so two requests to the same URL with
-different credentials share one cache entry and, while one of them is in flight,
-one request. In a browser tab with a single user that is what you want. On a
-server, where one axios instance serves many users, it hands one user's response
-to another: there, either turn cache and dedupe off or use a `requestKey` that
-includes the user.
-
-`defaultRequestKey(config)` and `stableSerialize(value)` are exported, so a
-custom key can build on the default or reuse its serialization, which sorts
-object keys and `URLSearchParams`:
+Any object with `get`, `set`, `delete` and `clear` works as storage, and every
+method may be async. A storage that fails never fails a request (it just runs
+uncached), so report the errors to notice it:
 
 ```ts
-import {
-  defaultRequestKey,
-  stableSerialize,
-} from "@mittwald/axios-cache-with-retry";
+const prefix = "http-cache:";
 
-const requestKey = ({ config }) =>
-  config.url?.startsWith("/search")
-    ? `search:${config.url}:${stableSerialize(config.data)}`
-    : defaultRequestKey(config);
-```
-
-### `storage`
-
-Defaults to an in-memory store, or pass any object implementing
-`RetryCacheStorage`; every method may return a promise, so an async backend
-works as well.
-
-`createMemoryStorage({ maxEntries, sweepInterval })` keeps at most `maxEntries`
-entries (default `1024`, `Infinity` for no limit) and evicts the least recently
-read or written one. On the first write after `sweepInterval` milliseconds
-(default five minutes) it also removes entries that can no longer be served.
-
-An entry can no longer be served once its `staleUntil` has passed: right at
-expiry when it was written without `staleIfError`, `maxStaleAge` after expiry
-with it, and never without `maxStaleAge`. A request that reads such an entry
-deletes it, whatever the storage.
-
-### `onStorageError`
-
-Called when the cache layer swallows a storage error, so a storage that is down
-shows up in logs or metrics instead of only as uncached requests:
-
-```ts
-setupAxiosRetryCache(instance, {
-  storage,
+const client = setupAxiosRetryCache(axios.create(), {
+  storage: {
+    get: async (key) => {
+      const value = await redis.get(prefix + key);
+      return value ? JSON.parse(value) : undefined;
+    },
+    set: async (key, entry) => {
+      await redis.set(prefix + key, JSON.stringify(entry));
+    },
+    delete: async (key) => (await redis.del(prefix + key)) > 0,
+    clear: async () => {
+      const keys = await redis.keys(prefix + "*");
+      if (keys.length > 0) await redis.del(...keys);
+    },
+    keys: async () =>
+      (await redis.keys(prefix + "*")).map((key) => key.slice(prefix.length)),
+  },
   onStorageError: ({ operation, key, error }) => {
     logger.warn({ operation, key, error }, "retry cache storage failed");
   },
 });
 ```
 
-`operation` is `"get"`, `"set"` or `"delete"` (a dead entry that a request could
-not remove). The callback only observes: the request behaves the same with or
-without it, and an error the callback throws, or a promise it returns that
-rejects, is swallowed as well.
+`keys` is optional; `invalidatePrefix` and `invalidateWhere` need it.
 
-## Cache API
+## Reference
 
-`client.retryCache` exposes `get`, `set`, `invalidate`, `invalidatePrefix`,
-`invalidateWhere` and `clear`. `invalidatePrefix` needs a storage that
-implements either `deletePrefix` or `keys` — the built-in memory storage
-implements both.
+### `cache`
 
-`invalidateWhere(predicate)` deletes every entry the predicate matches and
-returns how many it deleted. The predicate gets `{ key, method, url, baseURL }`,
-taken from the request that stored the entry, so a consumer can match on the URL
-without parsing its own key format. An entry stored without that information
-passes only `key`. It needs a storage that implements `keys`.
+| Option         | Default          | Description                                                  |
+| -------------- | ---------------- | ------------------------------------------------------------ |
+| `enabled`      | `true`           | Set to `false` to keep the cache off until a request opts in |
+| `ttl`          | `60000`          | How long an entry is answered from the cache, in ms          |
+| `methods`      | `["get","head"]` | Methods whose responses are cached                           |
+| `staleIfError` | `false`          | Return an expired entry when every attempt failed            |
+| `maxStaleAge`  | unlimited        | How long after expiry `staleIfError` may use an entry, in ms |
+| `shouldCache`  | 2xx status       | Decides whether a response is stored                         |
 
-```ts
-await client.retryCache.invalidateWhere(
-  ({ url }) => url?.startsWith("/tickets/") ?? false,
-);
-```
+An entry written without `staleIfError` is gone at expiry, also for a later
+request that has `staleIfError` on.
 
-An invalidation also reaches requests in flight with a matching key: the next
-caller starts a new request instead of joining one that began before, and the
-response of the earlier request is not stored. Callers that were already waiting
-still get it, but never the stale entry from before the invalidation: with
-`staleIfError`, a detached request that fails rejects. This only works through
-`client.retryCache`, which covers every instance set up on the same storage;
-deleting entries in the storage directly leaves requests in flight untouched.
-`invalidatePrefix` matches requests in flight by plain string prefix, whatever
-rules a custom storage's `deletePrefix` applies to stored keys.
+### `retry`
 
-## Behaviour worth knowing
+| Option                | Default                             | Description                                                             |
+| --------------------- | ----------------------------------- | ----------------------------------------------------------------------- |
+| `enabled`             | `true`                              | Set to `false` to keep retry off until a request opts in                |
+| `retries`             | `2`                                 | Attempts after the first one                                            |
+| `methods`             | `["get","head","options"]`          | Methods that may be retried                                             |
+| `retryOnStatus`       | `408, 425, 429, 500, 502, 503, 504` | Status codes that trigger a retry                                       |
+| `retryOnNetworkError` | `true`                              | Retry errors without a response                                         |
+| `respectRetryAfter`   | `true`                              | Wait as long as a `Retry-After` header asks                             |
+| `delay`               | 100 ms, doubling, at most 30 s      | Fixed ms or a function of the attempt                                   |
+| `maxDelay`            | `30000`                             | Upper bound for every pause, `Infinity` for none; must be a number >= 0 |
+| `shouldRetry`         | none                                | Replaces the decision on methods, status codes and network errors       |
 
-- **Deduplication wraps the whole operation**, retries included: concurrent
-  callers with the same key wait for one shared result and each receive their
-  own shallow copy, carrying their own `config`. A failure reaches every caller
-  as its own copy of the error.
-- **Writes are not deduplicated.** Two concurrent writes are two intended
-  operations, so each one reaches the network, whatever its key. Merged are the
-  safe methods (`GET`, `HEAD`, `OPTIONS`) and the methods listed in
-  `cache.methods`, such as a search sent as `POST`, which that list declares
-  reads.
-- **The request key decides what counts as one request.** Requests with the same
-  key share a cache entry and, while one of them is in flight, its result. The
-  default key carries the body for every method except `GET` and `HEAD`. A
-  custom key for a method in `cache.methods` has to carry it as well, or two
-  searches with different bodies get the same answer.
-- **A cache hit short-circuits before retry**, so a cached response never
-  produces a request.
-- **`staleIfError` only serves an expired entry after retries are exhausted**,
-  never instead of a retry.
-- **Only 2xx responses are cached by default, never errors.** A 404 that
-  `validateStatus` accepts is not stored either, unless `shouldCache` says so.
-- **A failing storage never fails a request.** A read that throws counts as a
-  miss, and a write that throws leaves the response uncached. A throwing
-  `shouldCache` still rejects the request, and `client.retryCache` passes
-  storage errors on. `onStorageError` reports what the cache layer swallows.
-- **`Retry-After` above `maxDelay` ends the retries.** The caller gets the
-  response that carried the header at once instead of waiting, since a retry
-  before that time is expected to fail again. A configured `delay` above
-  `maxDelay` is capped at it.
-- **An abort ends the retries.** A canceled request is never retried, and an
-  abort during a retry delay rejects at once instead of starting the next
-  attempt.
-- **Merged callers abort on their own.** An abort rejects only the caller whose
-  `signal` fired; the shared request keeps running for the others and is aborted
-  once every caller waiting for it has aborted. The deprecated `cancelToken` is
-  not isolated this way.
+A `Retry-After` above `maxDelay` ends the retries, even when `shouldRetry`
+returns `true`: the caller gets that response at once. A configured `delay`
+above `maxDelay` is cut to it.
 
-## Why this exists
+### `requestKey`, `dedupe`, `storage`, `onStorageError`
 
-Retry, cache and in-flight deduplication are three decisions about the _same_
-request, but an interceptor can only see a request on its way out and a response
-on its way back. It cannot wrap the dispatch itself — and a retry is by
-definition a second dispatch. So an interceptor-based retry has to re-send the
-config, which means re-entering the interceptor chain, which means every other
-layer sees a request the caller never made. Stacking the layers is the only
-composition the interceptor API offers, and both stacking orders are wrong.
+| Option           | Default                 | Description                                                    |
+| ---------------- | ----------------------- | -------------------------------------------------------------- |
+| `requestKey`     | `defaultRequestKey`     | Function of `{ config }`; `undefined` excludes a request       |
+| `dedupe`         | `true`                  | Merge identical reads that run at the same time                |
+| `storage`        | `createMemoryStorage()` | Where entries live                                             |
+| `onStorageError` | none                    | Called with `{ operation, key, error }` when the storage fails |
 
-The popular packages each solve one third of the problem and sit in a position
-that collides with the others:
+`defaultRequestKey(config)` and `stableSerialize(value)` are exported for custom
+keys. `stableSerialize` sorts object keys and `URLSearchParams`, so the order of
+`params` doesn't matter.
 
-- **`axios-retry`** and **`retry-axios`** hook the response (error) path and
-  retry by re-dispatching the request config.
-- **`axios-cache-interceptor`** caches _and_ deduplicates concurrent requests
-  from a request/response interceptor pair, with its own in-flight bookkeeping
-  keyed per request.
-- **`axios-cache-adapter`** (unmaintained) and **`axios-extensions`**
-  (`cacheAdapterEnhancer`, `throttleAdapterEnhancer`) take the adapter position
-  instead — so they cannot coexist with each other, or with anything else that
-  wants to own the adapter.
+`createMemoryStorage({ maxEntries, sweepInterval })` keeps at most `maxEntries`
+entries (default `1024`, `Infinity` for no limit) and drops the least recently
+used one. On the first write after `sweepInterval` ms (default 5 minutes) it
+removes entries that can no longer be used.
 
-### Where it snags
+`onStorageError` gets `operation` `"get"`, `"set"` or `"delete"`. It only
+observes; errors it throws are swallowed.
 
-Three components ask for `GET /users` at the same time. The endpoint answers
-`503` twice and then `200`. Retry is configured for two extra attempts, and the
-cache layer deduplicates in-flight requests. One logical request, one expected
-outcome: three responses out of three network calls.
+### Per-request `retryCache`
 
-**Deduplication inside the retry** (cache layer closest to the request): dedupe
-collapses the three callers onto one dispatch, that dispatch fails with `503`,
-and the rejection fans back out to all three callers — each of which then runs
-its _own_ retry handler, because each call walks the interceptor chain
-separately. Three retry loops instead of one, up to nine network calls for one
-logical `GET`, and whichever loop happens to finish first decides what ends up
-in the cache while the others are still retrying.
+| Value               | Effect                                           |
+| ------------------- | ------------------------------------------------ |
+| `false`             | Bypasses the adapter entirely                    |
+| `true`              | Enables cache and retry with the global settings |
+| `{ cache, retry }`  | Merges into the global settings for this request |
+| `{ dedupe: false }` | Opts this request out of merging                 |
 
-**Retry inside the deduplication** (retry layer closest to the request): every
-re-dispatch looks like a brand-new request to the cache layer above it, while
-that layer's in-flight entry for the first attempt is still open and still
-waiting to be settled by an attempt that has already been abandoned. Depending
-on how the cache keys its pending state, the second attempt either registers
-alongside the first — so the entry that gets stored is not the response the
-caller received — or waits on a promise the retry loop is never going to fulfil.
+The field is typed on Axios' own `AxiosRequestConfig`.
 
-**And the two layers disagree about what a failure is.** Retry lives on the
-error path, the cache lives on the success path, and which one a `503` takes is
-the caller's `validateStatus` setting. Accept non-2xx responses and the retry
-handler is never invoked at all, while the cache stores the `503` and serves it
-for the rest of its TTL.
+### `client.retryCache`
 
-### What this package does instead
+| Method                        | Effect                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------- |
+| `get(key)`                    | The stored entry                                                                |
+| `set(key, response, { ttl })` | Store a response yourself                                                       |
+| `invalidate(key)`             | Delete one entry                                                                |
+| `invalidatePrefix(prefix)`    | Delete every entry whose key starts with `prefix`                               |
+| `invalidateWhere(predicate)`  | Delete every entry for which `predicate({ key, method, url, baseURL })` is true |
+| `clear()`                     | Delete everything                                                               |
 
-All three concerns live in a single adapter, the one place that _does_ wrap the
-dispatch. One request key is resolved once, and one shared in-flight promise
-covers the entire operation: the cache lookup, the retry loop, and the cache
-write after the final attempt. Concurrent callers wait for that one result
-instead of starting their own loops, retries never re-enter the interceptor
-chain, and the retry decision is made for returned responses and thrown errors
-alike — so `validateStatus` stops being part of the retry semantics. The
-guarantees that follow from it are listed under
-[Behaviour worth knowing](#behaviour-worth-knowing) above.
+Every invalidation also detaches matching requests that are still running.
+Deleting directly in the storage does not, so always go through
+`client.retryCache`. Instances that share one storage are invalidated together.
+Entries written by 1.0.x pass only `key` to `invalidateWhere`.
+
+## Good to know
+
+- **Headers are not part of the default key.** See
+  [A server that serves many users](#a-server-that-serves-many-users).
+- **Writes are never merged**, whatever their key: two `POST`s are two intended
+  operations.
+- **Only 2xx responses are cached** unless `shouldCache` says otherwise, also
+  under `validateStatus: () => true`.
+- **Retries look at responses and thrown errors alike**, so they work the same
+  whatever `validateStatus` says.
+- **A cache hit never sends a request**, and `staleIfError` only steps in after
+  the last retry.
+- **An abort ends the retries**, and among merged callers it only rejects the
+  caller whose `signal` fired. The shared request stops once every caller has
+  aborted. The deprecated `cancelToken` is not isolated this way.
+- **A failing storage never fails a request**; `client.retryCache` methods do
+  pass storage errors on.
+- **Calling `setupAxiosRetryCache` twice** on one instance replaces the first
+  setup instead of stacking two.
+
+## Why one adapter
+
+Retry, cache and merging are three decisions about the same request. With
+interceptors they can't be combined: a retry is a second dispatch, it runs
+through all interceptors again, and every other layer sees a request the caller
+never made.
+
+Take three components that ask for `GET /users` at the same time while the
+server answers `503` twice and then `200`. With `axios-cache-interceptor`
+merging the requests and `axios-retry` retrying them, the merged failure reaches
+all three callers, and each runs its own retry loop: up to nine requests instead
+of three, and whichever loop finishes first decides what gets cached. Put the
+other way round, each retry looks like a new request to the cache layer while
+its entry for the first attempt is still open. And whether a `503` reaches the
+retry at all depends on `validateStatus`: accept it, and it is cached as a
+success.
+
+This package does all three in the adapter, the one place that wraps the actual
+dispatch. One key, one shared promise for lookup, retries and write, and one
+retry decision for responses and errors alike.
 
 ## License
 
