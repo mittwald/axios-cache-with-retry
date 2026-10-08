@@ -1,10 +1,11 @@
 import axios, { type AxiosAdapter, type AxiosInstance } from "axios";
 import { withCache } from "./cache.js";
 import { type InflightRequests, withDedupe } from "./dedupe.js";
-import { resolveRequestKey } from "./key.js";
+import { describeRequest, resolveRequestKey } from "./key.js";
 import { snapshotResponse } from "./response.js";
-import { DEFAULT_RETRY_STATUS, withRetry } from "./retry.js";
-import { createMemoryStorage, deletePrefix } from "./storage.js";
+import { DEFAULT_MAX_DELAY, DEFAULT_RETRY_STATUS, withRetry } from "./retry.js";
+import { createMemoryStorage, deletePrefix, deleteWhere } from "./storage.js";
+import { flightsFor } from "./flights.js";
 import type {
   AxiosRetryCacheInstance,
   CacheOptions,
@@ -29,6 +30,7 @@ const DEFAULT_RETRY: RetryOptions = {
   retryOnStatus: DEFAULT_RETRY_STATUS,
   retryOnNetworkError: true,
   respectRetryAfter: true,
+  maxDelay: DEFAULT_MAX_DELAY,
 };
 
 const installedAdapters = new WeakMap<AxiosInstance, AxiosAdapter>();
@@ -37,11 +39,13 @@ export function setupAxiosRetryCache(
   instance: AxiosInstance,
   options: RetryCacheOptions = {},
 ): AxiosRetryCacheInstance {
+  assertValidRetry(options.retry);
   const storage = options.storage ?? createMemoryStorage();
   const originalAdapter =
     installedAdapters.get(instance) ??
     axios.getAdapter(instance.defaults.adapter);
   const inflight: InflightRequests = new Map();
+  const flights = flightsFor(storage);
 
   installedAdapters.set(instance, originalAdapter);
 
@@ -70,11 +74,17 @@ export function setupAxiosRetryCache(
     let adapter = withRetry(originalAdapter, effective.retry);
 
     if (cache && requestKey) {
-      adapter = withCache(adapter, { key: requestKey, cache, storage });
+      adapter = withCache(adapter, {
+        key: requestKey,
+        cache,
+        storage,
+        flights,
+        onStorageError: options.onStorageError,
+      });
     }
 
     if (dedupeEnabled && requestKey) {
-      adapter = withDedupe(adapter, inflight, requestKey);
+      adapter = withDedupe(adapter, inflight, requestKey, flights);
     }
 
     return adapter(config);
@@ -94,15 +104,25 @@ export function setupAxiosRetryCache(
         expiresAt:
           now + (setOptions.ttl ?? normalizeCacheOptions(options.cache).ttl),
         response: snapshotResponse(response),
+        ...(response.config
+          ? { request: describeRequest(response.config) }
+          : {}),
       });
     },
     async invalidate(key) {
+      flights.detach((target) => target.key === key);
       return storage.delete(key);
     },
     async invalidatePrefix(prefix) {
+      flights.detach((target) => target.key.startsWith(prefix));
       return deletePrefix(storage, prefix);
     },
+    async invalidateWhere(predicate) {
+      flights.detach(predicate);
+      return deleteWhere(storage, predicate);
+    },
     async clear() {
+      flights.detach(() => true);
       await storage.clear();
     },
   };
@@ -178,6 +198,8 @@ function resolveRetryOptions(
     return false;
   }
 
+  assertValidRetry(requestRetry);
+
   if (requestRetry === true) {
     return {
       ...normalizeRetryOptions(globalRetry),
@@ -198,6 +220,21 @@ function resolveRetryOptions(
   };
 
   return retry.enabled === false ? false : retry;
+}
+
+function assertValidRetry(
+  retry: RetryCacheOptions["retry"] | RetryCacheRequestOptions["retry"],
+): void {
+  const maxDelay = typeof retry === "object" ? retry.maxDelay : undefined;
+
+  if (
+    maxDelay !== undefined &&
+    !(typeof maxDelay === "number" && maxDelay >= 0)
+  ) {
+    throw new TypeError(
+      `retry.maxDelay must be a number >= 0 or Infinity, got ${String(maxDelay)}`,
+    );
+  }
 }
 
 function normalizeCacheOptions(

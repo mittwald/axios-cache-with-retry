@@ -3,6 +3,7 @@ import type { InternalAxiosRequestConfig } from "axios";
 import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_RETRY_STATUS,
+  retryAfterExceedsMaxDelay,
   retryDelay,
   shouldRetry,
   sleep,
@@ -217,6 +218,12 @@ describe("retryDelay", () => {
   });
 
   it("ignores Retry-After when respectRetryAfter is off", async () => {
+    expect(
+      retryAfterExceedsMaxDelay(
+        context({ response: responseWith(429, { "retry-after": "3600" }) }),
+        options({ respectRetryAfter: false }),
+      ),
+    ).toBe(false);
     await expect(
       retryDelay(
         context({ response: responseWith(429, { "retry-after": "2" }) }),
@@ -262,6 +269,92 @@ describe("retryDelay", () => {
         options({ respectRetryAfter: true }),
       ),
     ).resolves.toBe(100);
+  });
+});
+
+describe("retryDelay with maxDelay", () => {
+  it("gives up on a Retry-After of an hour", () => {
+    expect(
+      retryAfterExceedsMaxDelay(
+        context({ response: responseWith(503, { "retry-after": "3600" }) }),
+        options({ delay: 2_000, respectRetryAfter: true }),
+      ),
+    ).toBe(true);
+  });
+
+  it("gives up on a Retry-After date two hours ahead", () => {
+    expect(
+      retryAfterExceedsMaxDelay(
+        context({
+          response: responseWith(503, {
+            "retry-after": new Date(Date.now() + 7_200_000).toUTCString(),
+          }),
+        }),
+        options({ respectRetryAfter: true }),
+      ),
+    ).toBe(true);
+  });
+
+  it("caps a fixed delay and a function delay at 30s", async () => {
+    await expect(
+      retryDelay(context(), options({ delay: 60_000 })),
+    ).resolves.toBe(30_000);
+    await expect(
+      retryDelay(context(), options({ delay: () => 60_000 })),
+    ).resolves.toBe(30_000);
+  });
+
+  it("waits for a Retry-After of exactly maxDelay", async () => {
+    const exactly = context({
+      response: responseWith(503, { "retry-after": "30" }),
+    });
+
+    expect(
+      retryAfterExceedsMaxDelay(exactly, options({ respectRetryAfter: true })),
+    ).toBe(false);
+    await expect(
+      retryDelay(
+        context({ response: responseWith(503, { "retry-after": "30" }) }),
+        options({ respectRetryAfter: true }),
+      ),
+    ).resolves.toBe(30_000);
+  });
+
+  it("honours a custom maxDelay", async () => {
+    const retryAfter = context({
+      response: responseWith(503, { "retry-after": "2" }),
+    });
+
+    expect(
+      retryAfterExceedsMaxDelay(
+        retryAfter,
+        options({ respectRetryAfter: true, maxDelay: 1_000 }),
+      ),
+    ).toBe(true);
+    await expect(
+      retryDelay(context(), options({ delay: 5_000, maxDelay: 1_000 })),
+    ).resolves.toBe(1_000);
+  });
+
+  it("lifts the bound with maxDelay: Infinity", async () => {
+    expect(
+      retryAfterExceedsMaxDelay(
+        context({ response: responseWith(503, { "retry-after": "3600" }) }),
+        options({ respectRetryAfter: true, maxDelay: Infinity }),
+      ),
+    ).toBe(false);
+    await expect(
+      retryDelay(
+        context({ response: responseWith(503, { "retry-after": "3600" }) }),
+        options({ respectRetryAfter: true, maxDelay: Infinity }),
+      ),
+    ).resolves.toBe(3_600_000);
+  });
+
+  it("keeps the backoff capped at 30s with maxDelay: Infinity", async () => {
+    await expect(
+      retryDelay(context({ attempt: 20 }), options({ maxDelay: Infinity })),
+    ).resolves.toBe(30_000);
   });
 });
 

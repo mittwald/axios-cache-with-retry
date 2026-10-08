@@ -5,6 +5,8 @@ import {
   type InternalAxiosRequestConfig,
 } from "axios";
 import { raceAbort } from "./abort.js";
+import type { Flights } from "./flights.js";
+import { describeRequest } from "./key.js";
 import { cloneError, cloneResponse } from "./response.js";
 
 interface SharedRequest {
@@ -20,6 +22,7 @@ export function withDedupe(
   adapter: AxiosAdapter,
   inflight: InflightRequests,
   key: string,
+  flights: Flights,
 ): AxiosAdapter {
   return (config) => {
     if (config.signal?.aborted) {
@@ -41,7 +44,16 @@ export function withDedupe(
         },
       };
 
-      created.promise.then(created.forget, created.forget);
+      const flight = flights.track(
+        { key, ...describeRequest(config) },
+        created.forget,
+      );
+      const land = () => {
+        created.forget();
+        flight.land();
+      };
+
+      created.promise.then(land, land);
       inflight.set(key, created);
       shared = created;
     }

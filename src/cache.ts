@@ -3,59 +3,92 @@ import type {
   AxiosResponse,
   InternalAxiosRequestConfig,
 } from "axios";
+import type { Flights } from "./flights.js";
+import { describeRequest } from "./key.js";
 import { responseFromCache, snapshotResponse } from "./response.js";
-import type { CacheEntry, CacheOptions, RetryCacheStorage } from "./types.js";
+import type {
+  CacheEntry,
+  CacheOptions,
+  RetryCacheOptions,
+  RetryCacheStorage,
+  StorageErrorContext,
+} from "./types.js";
 
 export interface CacheLayerOptions {
   key: string;
   cache: CacheOptions;
   storage: RetryCacheStorage;
+  flights: Flights;
+  onStorageError?: RetryCacheOptions["onStorageError"];
 }
 
 export function withCache(
   adapter: AxiosAdapter,
-  { key, cache, storage }: CacheLayerOptions,
+  { key, cache, storage, flights, onStorageError }: CacheLayerOptions,
 ): AxiosAdapter {
+  const report = (context: StorageErrorContext) =>
+    reportStorageError(onStorageError, context);
+
   return async (config) => {
-    const entry = await readEntry(storage, key);
+    const entry = await readEntry(storage, key, report);
 
     if (entry && isFresh(entry)) {
       return responseFromCache(entry, config);
     }
 
-    let response: AxiosResponse;
+    const request = describeRequest(config);
+    const flight = flights.track({ key, ...request });
 
     try {
-      response = await adapter(config);
-    } catch (error) {
-      if (cache.staleIfError && entry) {
-        return responseFromCache(entry, config);
+      let response: AxiosResponse;
+
+      try {
+        response = await adapter(config);
+      } catch (error) {
+        if (cache.staleIfError && entry && !flight.detached) {
+          return responseFromCache(entry, config);
+        }
+
+        throw error;
       }
 
-      throw error;
-    }
+      if (
+        (await isCacheable(key, config, response, cache)) &&
+        !flight.detached
+      ) {
+        const now = Date.now();
+        await writeEntry(
+          storage,
+          key,
+          {
+            key,
+            createdAt: now,
+            expiresAt: now + cache.ttl,
+            response: snapshotResponse(response),
+            request,
+          },
+          report,
+        );
+      }
 
-    if (await isCacheable(key, config, response, cache)) {
-      const now = Date.now();
-      await writeEntry(storage, key, {
-        key,
-        createdAt: now,
-        expiresAt: now + cache.ttl,
-        response: snapshotResponse(response),
-      });
+      return response;
+    } finally {
+      flight.land();
     }
-
-    return response;
   };
 }
+
+type Report = (context: StorageErrorContext) => void;
 
 async function readEntry(
   storage: RetryCacheStorage,
   key: string,
+  report: Report,
 ): Promise<CacheEntry | undefined> {
   try {
     return await storage.get(key);
-  } catch {
+  } catch (error) {
+    report({ operation: "get", key, error });
     return undefined;
   }
 }
@@ -64,12 +97,27 @@ async function writeEntry(
   storage: RetryCacheStorage,
   key: string,
   entry: CacheEntry,
-): Promise<boolean> {
+  report: Report,
+): Promise<void> {
   try {
     await storage.set(key, entry);
-    return true;
+  } catch (error) {
+    report({ operation: "set", key, error });
+  }
+}
+
+function reportStorageError(
+  onStorageError: RetryCacheOptions["onStorageError"],
+  context: StorageErrorContext,
+): void {
+  try {
+    const result: unknown = onStorageError?.(context);
+
+    if (result instanceof Promise) {
+      result.catch(() => undefined);
+    }
   } catch {
-    return false;
+    return;
   }
 }
 

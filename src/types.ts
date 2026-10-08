@@ -50,6 +50,13 @@ export interface RetryOptions {
   retryOnStatus?: number[];
   retryOnNetworkError?: boolean;
   respectRetryAfter?: boolean;
+  /**
+   * Upper bound in milliseconds for every delay, 30 000 by default and
+   * `Infinity` for none. A configured `delay` or the backoff is capped at it,
+   * while a `Retry-After` above it ends the retries, even when `shouldRetry`
+   * returns `true`. Anything but a number >= 0 throws.
+   */
+  maxDelay?: number;
   delay?: number | ((context: RetryDelayContext) => Awaitable<number>);
   shouldRetry?: (context: RetryDecisionContext) => Awaitable<boolean>;
 }
@@ -60,12 +67,19 @@ export interface RetryCacheRequestOptions {
   dedupe?: boolean;
 }
 
+export interface StorageErrorContext {
+  operation: "get" | "set";
+  key: string;
+  error: unknown;
+}
+
 export interface RetryCacheOptions {
   requestKey?: RetryCacheRequestKey;
   cache?: false | Partial<CacheOptions>;
   retry?: false | Partial<RetryOptions>;
   dedupe?: boolean;
   storage?: RetryCacheStorage;
+  onStorageError?: (context: StorageErrorContext) => void;
 }
 
 export interface CachedResponse<T = unknown> {
@@ -75,11 +89,22 @@ export interface CachedResponse<T = unknown> {
   headers: Record<string, string>;
 }
 
+export interface CachedRequest {
+  method: string;
+  url?: string;
+  baseURL?: string;
+}
+
 export interface CacheEntry<T = unknown> {
   key: string;
   createdAt: number;
   expiresAt: number;
   response: CachedResponse<T>;
+  request?: CachedRequest;
+}
+
+export interface InvalidationTarget extends Partial<CachedRequest> {
+  key: string;
 }
 
 export interface RetryCacheStorage<T = unknown> {
@@ -100,6 +125,9 @@ export interface RetryCacheApi {
   ): Promise<void>;
   invalidate(key: string): Promise<boolean>;
   invalidatePrefix(prefix: string): Promise<number>;
+  invalidateWhere(
+    predicate: (target: InvalidationTarget) => boolean,
+  ): Promise<number>;
   clear(): Promise<void>;
 }
 

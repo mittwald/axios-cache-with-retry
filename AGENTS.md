@@ -87,6 +87,19 @@ re-run on every cache hit. Data you read back via `retryCache.get` is therefore
 not what the caller saw, and a response handed to `retryCache.set` is expected
 in the same pre-transform shape.
 
+**Invalidation detaches requests in flight** (`src/flights.ts`). What to watch:
+
+- Deleting in the storage directly bypasses the registry.
+- `flightsByStorage` is module-scoped, like `installedAdapters`: with two copies
+  of this package, invalidating through one does not detach the flights of the
+  other.
+- Every invalidation API on `client.retryCache` has to call `flights.detach`
+  before it deletes; a new one that does not silently brings back #10.
+- `invalidateWhere` hands the predicate `entry.request` for stored entries and
+  the same fields for flights, but an entry stored without `request` (by 1.0.x,
+  or directly in the storage) passes only `key`, so a predicate on `url` alone
+  never matches it.
+
 ---
 
 ## Resolving options
@@ -122,6 +135,11 @@ default key carries the body for every method outside `METHODS_WITHOUT_BODY` in
 may carry a body. A custom key that leaves the body out merges and caches such
 requests across bodies; the tests in "deduplication of writes" pin both sides.
 
+Headers are not part of the default key, `Authorization` included, so an
+instance shared by several users (typically on a server) needs cache and dedupe
+off or a user-aware `requestKey`. The README says so under `requestKey`; "the
+default key" in `test/adapter.test.ts` pins it.
+
 ---
 
 ## Retry
@@ -138,6 +156,11 @@ request's config, as the ones from axios' own adapters do.
 `retryDelay` checks `Retry-After` first when `respectRetryAfter` is on, so a
 configured `delay` function is skipped for any response carrying that header —
 typically 429s, which is exactly where people expect their own backoff to run.
+`maxDelay` (default 30 s) bounds every delay, but not alike: a configured
+`delay` or the backoff is capped at it, while a `Retry-After` above it ends the
+retries, because a retry before the time the server asked for is expected to
+fail again. That check runs after `shouldRetry`, so a custom `shouldRetry` that
+returns `true` is still overridden by a long `Retry-After`.
 
 **`withRetry` turns every attempt into one outcome**, a returned response or a
 thrown error, and makes a single decision for both, because whether a failure
@@ -202,11 +225,16 @@ backends may return promises from every method (`Awaitable<T>`).
 miss and a failing `set` into an uncached response: a cache that cannot store
 must not fail a request the network has answered. A throwing `shouldCache` is
 consumer code and still rejects, and `client.retryCache` passes storage errors
-on.
+on. Both helpers hand what they swallow to `onStorageError` through
+`reportStorageError`, which swallows the callback's own errors and rejections,
+so observing cannot fail a request either. `client.retryCache` does not report:
+its caller already gets the error.
 
 `src/index.ts` is the entire public surface. Several helpers are exported from
 their own modules for testing convenience but are not re-exported there, and are
-not API.
+not API. `defaultRequestKey` and `stableSerialize` are the exception: they are
+re-exported so custom keys can reuse them, and changing their output changes
+every consumer's keys. `test/exports.test.ts` pins the runtime exports.
 
 ---
 

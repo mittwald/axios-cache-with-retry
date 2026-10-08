@@ -8,6 +8,7 @@ import axios, {
 import { describe, expect, it, vi } from "vitest";
 import {
   createMemoryStorage,
+  type RetryCacheOptions,
   type RetryCacheStorage,
   setupAxiosRetryCache,
 } from "../src/index.js";
@@ -167,6 +168,27 @@ describe("opting out", () => {
 
     await client.post("/submit", { name: "Ada" }, accepted);
 
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the default key", () => {
+  it("gives requests that differ only in their headers one cache entry", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200, config.headers.Authorization),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 60_000 },
+    });
+
+    await client.get("/users/self", {
+      headers: { Authorization: "Bearer alice" },
+    });
+    const bob = await client.get("/users/self", {
+      headers: { Authorization: "Bearer bob" },
+    });
+
+    expect(bob.data).toBe("Bearer alice");
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 });
@@ -709,6 +731,89 @@ describe("cache lifecycle", () => {
   });
 });
 
+describe("reporting storage errors", () => {
+  function failingStorage(): RetryCacheStorage {
+    return {
+      get: () => {
+        throw new Error("storage down");
+      },
+      set: () => Promise.reject(new Error("storage full")),
+      delete: () => false,
+      clear: () => undefined,
+    };
+  }
+
+  function setup(
+    storage: RetryCacheStorage,
+    onStorageError: RetryCacheOptions["onStorageError"],
+  ) {
+    return setupAxiosRetryCache(
+      axios.create({ adapter: async (config) => response(config, 200) }),
+      {
+        cache: { ttl: 10_000 },
+        retry: false,
+        requestKey: ({ config }) => String(config.url),
+        storage,
+        onStorageError,
+      },
+    );
+  }
+
+  it("reports a failing read and a failing write with operation, key and error", async () => {
+    const onStorageError = vi.fn();
+    const client = setup(failingStorage(), onStorageError);
+
+    const result = await client.get("/users");
+
+    expect(result.status).toBe(200);
+    expect(onStorageError.mock.calls).toEqual([
+      [{ operation: "get", key: "/users", error: new Error("storage down") }],
+      [{ operation: "set", key: "/users", error: new Error("storage full") }],
+    ]);
+  });
+
+  it("reports nothing while the storage works", async () => {
+    const onStorageError = vi.fn();
+    const client = setup(createMemoryStorage(), onStorageError);
+
+    await client.get("/users");
+    await client.get("/users");
+
+    expect(onStorageError).not.toHaveBeenCalled();
+  });
+
+  it("answers the request when the callback throws", async () => {
+    const client = setup(failingStorage(), () => {
+      throw new Error("logger down");
+    });
+
+    await expect(client.get("/users")).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("swallows a rejection of an async callback", async () => {
+    let calls = 0;
+    const onStorageError = (() => {
+      calls += 1;
+      return Promise.reject(new Error("logger down"));
+    }) as unknown as RetryCacheOptions["onStorageError"];
+    const client = setup(failingStorage(), onStorageError);
+
+    await expect(client.get("/users")).resolves.toMatchObject({ status: 200 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toBe(2);
+  });
+
+  it("leaves client.retryCache passing storage errors on, unreported", async () => {
+    const onStorageError = vi.fn();
+    const client = setup(failingStorage(), onStorageError);
+
+    await expect(client.retryCache.get("/users")).rejects.toThrow(
+      "storage down",
+    );
+    expect(onStorageError).not.toHaveBeenCalled();
+  });
+});
+
 describe("retry timing", () => {
   it("lets a Retry-After header override a configured delay", async () => {
     const delay = vi.fn(() => 5_000);
@@ -730,6 +835,79 @@ describe("retry timing", () => {
     expect(result.status).toBe(200);
     expect(adapter).toHaveBeenCalledTimes(2);
     expect(delay).not.toHaveBeenCalled();
+  });
+
+  it("returns the response at once when Retry-After asks for more than maxDelay", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 503, undefined, { "retry-after": "1" }),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      retry: { retries: 1, delay: 0, maxDelay: 50 },
+    });
+
+    const answer = await client.get("/status", accepted);
+
+    expect(answer.status).toBe(503);
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects at once when a thrown 503 carries a Retry-After above maxDelay", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      throw new AxiosError(
+        "Service Unavailable",
+        AxiosError.ERR_BAD_RESPONSE,
+        config,
+        undefined,
+        response(config, 503, undefined, { "retry-after": "1" }),
+      );
+    });
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      retry: { retries: 1, delay: 0, maxDelay: 50 },
+    });
+
+    await expect(client.get("/status")).rejects.toMatchObject({
+      message: "Service Unavailable",
+      response: { status: 503 },
+    });
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([Number.NaN, -1, "30000"])(
+    "refuses maxDelay: %s at setup",
+    (maxDelay) => {
+      expect(() =>
+        setupAxiosRetryCache(axios.create(), {
+          retry: { maxDelay: maxDelay as number },
+        }),
+      ).toThrow(TypeError);
+    },
+  );
+
+  it("rejects a request with an invalid maxDelay without sending it", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+    });
+
+    await expect(
+      client.get("/status", {
+        retryCache: { retry: { maxDelay: Number.NaN } },
+      }),
+    ).rejects.toThrow(TypeError);
+    expect(adapter).not.toHaveBeenCalled();
+  });
+
+  it("accepts maxDelay: 0 and Infinity", () => {
+    expect(() =>
+      setupAxiosRetryCache(axios.create(), { retry: { maxDelay: 0 } }),
+    ).not.toThrow();
+    expect(() =>
+      setupAxiosRetryCache(axios.create(), { retry: { maxDelay: Infinity } }),
+    ).not.toThrow();
   });
 
   it("waits between attempts when a fixed delay is configured", async () => {

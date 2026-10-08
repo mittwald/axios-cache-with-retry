@@ -76,16 +76,17 @@ await client.get("/raw", { retryCache: false });
 
 ### `retry`
 
-| Option                | Default                             | Description                                              |
-| --------------------- | ----------------------------------- | -------------------------------------------------------- |
-| `enabled`             | `true`                              | Set to `false` to keep retry off until a request opts in |
-| `retries`             | `2`                                 | Attempts after the initial one                           |
-| `methods`             | `["get","head","options"]`          | Methods that may be retried                              |
-| `retryOnStatus`       | `408, 425, 429, 500, 502, 503, 504` | Status codes that trigger a retry                        |
-| `retryOnNetworkError` | `true`                              | Retry errors that never produced a response              |
-| `respectRetryAfter`   | `true`                              | Honour a `Retry-After` response header                   |
-| `delay`               | exponential, capped at 30 s         | Fixed milliseconds or a function                         |
-| `shouldRetry`         | —                                   | Replaces the built-in decision entirely                  |
+| Option                | Default                             | Description                                                                                         |
+| --------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `enabled`             | `true`                              | Set to `false` to keep retry off until a request opts in                                            |
+| `retries`             | `2`                                 | Attempts after the initial one                                                                      |
+| `methods`             | `["get","head","options"]`          | Methods that may be retried                                                                         |
+| `retryOnStatus`       | `408, 425, 429, 500, 502, 503, 504` | Status codes that trigger a retry                                                                   |
+| `retryOnNetworkError` | `true`                              | Retry errors that never produced a response                                                         |
+| `respectRetryAfter`   | `true`                              | Honour a `Retry-After` response header                                                              |
+| `delay`               | exponential, capped at 30 s         | Fixed milliseconds or a function; the backoff stays at 30 s even with a larger `maxDelay`           |
+| `maxDelay`            | `30000`                             | Upper bound for every delay, `Infinity` for none; anything but a number >= 0 throws                 |
+| `shouldRetry`         | —                                   | Replaces the built-in decision, except that a `Retry-After` above `maxDelay` still ends the retries |
 
 ### `requestKey`
 
@@ -93,17 +94,82 @@ Cache and dedupe key for a request. Defaults to method, base URL, URL, a stably
 serialized `params` and — for non-`GET`/`HEAD` — a stably serialized body.
 Returning `undefined` excludes the request from both caching and deduplication.
 
+The key alone decides what counts as the same request. Headers are not part of
+the default key, `Authorization` included, so two requests to the same URL with
+different credentials share one cache entry and, while one of them is in flight,
+one request. In a browser tab with a single user that is what you want. On a
+server, where one axios instance serves many users, it hands one user's response
+to another: there, either turn cache and dedupe off or use a `requestKey` that
+includes the user.
+
+`defaultRequestKey(config)` and `stableSerialize(value)` are exported, so a
+custom key can build on the default or reuse its serialization, which sorts
+object keys and `URLSearchParams`:
+
+```ts
+import {
+  defaultRequestKey,
+  stableSerialize,
+} from "@mittwald/axios-cache-with-retry";
+
+const requestKey = ({ config }) =>
+  config.url?.startsWith("/search")
+    ? `search:${config.url}:${stableSerialize(config.data)}`
+    : defaultRequestKey(config);
+```
+
 ### `storage`
 
 Defaults to an in-memory store. Pass `createMemoryStorage({ maxEntries })` for a
 bounded one, or any object implementing `RetryCacheStorage`; every method may
 return a promise, so an async backend works as well.
 
+### `onStorageError`
+
+Called when the cache layer swallows a storage error, so a storage that is down
+shows up in logs or metrics instead of only as uncached requests:
+
+```ts
+setupAxiosRetryCache(instance, {
+  storage,
+  onStorageError: ({ operation, key, error }) => {
+    logger.warn({ operation, key, error }, "retry cache storage failed");
+  },
+});
+```
+
+`operation` is `"get"` or `"set"`. The callback only observes: the request
+behaves the same with or without it, and an error the callback throws, or a
+promise it returns that rejects, is swallowed as well.
+
 ## Cache API
 
-`client.retryCache` exposes `get`, `set`, `invalidate`, `invalidatePrefix` and
-`clear`. `invalidatePrefix` needs a storage that implements either
-`deletePrefix` or `keys` — the built-in memory storage implements both.
+`client.retryCache` exposes `get`, `set`, `invalidate`, `invalidatePrefix`,
+`invalidateWhere` and `clear`. `invalidatePrefix` needs a storage that
+implements either `deletePrefix` or `keys` — the built-in memory storage
+implements both.
+
+`invalidateWhere(predicate)` deletes every entry the predicate matches and
+returns how many it deleted. The predicate gets `{ key, method, url, baseURL }`,
+taken from the request that stored the entry, so a consumer can match on the URL
+without parsing its own key format. An entry stored without that information
+passes only `key`. It needs a storage that implements `keys`.
+
+```ts
+await client.retryCache.invalidateWhere(
+  ({ url }) => url?.startsWith("/tickets/") ?? false,
+);
+```
+
+An invalidation also reaches requests in flight with a matching key: the next
+caller starts a new request instead of joining one that began before, and the
+response of the earlier request is not stored. Callers that were already waiting
+still get it, but never the stale entry from before the invalidation: with
+`staleIfError`, a detached request that fails rejects. This only works through
+`client.retryCache`, which covers every instance set up on the same storage;
+deleting entries in the storage directly leaves requests in flight untouched.
+`invalidatePrefix` matches requests in flight by plain string prefix, whatever
+rules a custom storage's `deletePrefix` applies to stored keys.
 
 ## Behaviour worth knowing
 
@@ -130,7 +196,11 @@ return a promise, so an async backend works as well.
 - **A failing storage never fails a request.** A read that throws counts as a
   miss, and a write that throws leaves the response uncached. A throwing
   `shouldCache` still rejects the request, and `client.retryCache` passes
-  storage errors on.
+  storage errors on. `onStorageError` reports what the cache layer swallows.
+- **`Retry-After` above `maxDelay` ends the retries.** The caller gets the
+  response that carried the header at once instead of waiting, since a retry
+  before that time is expected to fail again. A configured `delay` above
+  `maxDelay` is capped at it.
 - **An abort ends the retries.** A canceled request is never retried, and an
   abort during a retry delay rejects at once instead of starting the next
   attempt.
