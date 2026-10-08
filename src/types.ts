@@ -1,5 +1,4 @@
 import type {
-  AxiosAdapter,
   AxiosError,
   AxiosInstance,
   AxiosResponse,
@@ -134,8 +133,6 @@ export interface RetryCacheApi {
 export type AxiosRetryCacheInstance = AxiosInstance & {
   retryCache: RetryCacheApi;
 };
-
-export type AdapterFactory = (adapter: AxiosAdapter) => AxiosAdapter;
 
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars --
    a declaration merge only applies when the type parameter list repeats Axios'
