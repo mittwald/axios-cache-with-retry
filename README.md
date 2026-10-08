@@ -89,6 +89,11 @@ events.on("changed", async (path: string) => {
     ({ url }) => url?.startsWith(path) ?? false,
   );
 });
+
+await client.get("/tickets/1"); // request, answer cached for 5 minutes
+await client.get("/tickets/1"); // from the cache, no request
+// the server reports a change: events.emit("changed", "/tickets/")
+await client.get("/tickets/1"); // request again, the new answer is cached
 ```
 
 An invalidation also reaches requests that are still running: the next caller
@@ -105,6 +110,10 @@ const client = setupAxiosRetryCache(axios.create(), {
   cache: false,
   dedupe: false,
 });
+
+// at the same time, for two users:
+client.get("/me", { headers: { Authorization: aliceToken } }); // request
+client.get("/me", { headers: { Authorization: bobToken } }); // its own request
 ```
 
 If you do want a cache there, put the user into the key (see
@@ -121,9 +130,19 @@ const client = setupAxiosRetryCache(axios.create(), {
   retry: {
     retries: 2,
     shouldRetry: ({ response }) => response?.status === 404,
-    delay: ({ attempt }) => attempt ** 2 * 100, // 100 ms, then 400 ms
+    delay: ({ attempt }) => attempt ** 2 * 100,
   },
 });
+
+await client.post("/tickets", { title: "Printer jam" }); // 201, id 7
+await client.get("/tickets/7");
+// GET → 404, wait 100 ms
+// GET → 404, wait 400 ms
+// GET → 200, answer returned and cached
+
+await client.get("/tickets/8"); // never created
+// GET → 404, wait 100 ms, GET → 404, wait 400 ms, GET → 404:
+// rejects with the 404 after about half a second
 ```
 
 `shouldRetry` replaces the built-in decision (methods, status codes, network
@@ -139,11 +158,18 @@ cannot be reached:
 const client = setupAxiosRetryCache(axios.create(), {
   cache: { ttl: 5 * 60_000, staleIfError: true, maxStaleAge: 60 * 60_000 },
 });
+
+await client.get("/status"); // request, answer cached
+// after 3 minutes:
+await client.get("/status"); // from the cache, no request
+// after 10 minutes, the server is down:
+await client.get("/status"); // request and both retries fail: the old answer
+// after 70 minutes, the server is still down:
+await client.get("/status"); // too old: rejects with the error, entry deleted
 ```
 
-For the first 5 minutes the cache answers. After that every request goes to the
-server; if it fails after all retries, the old answer is returned, for up to one
-more hour. After that the caller gets the error and the entry is deleted.
+While the server is up, every request after the first 5 minutes simply fetches
+and caches a new answer.
 
 ### A search sent as POST
 
@@ -152,11 +178,17 @@ is really a read; the default key includes the body, so different searches stay
 apart:
 
 ```ts
-await client.post(
-  "/search",
-  { query: "invoices" },
-  { retryCache: { cache: { methods: ["post"] } } },
-);
+const search = (query: string) =>
+  client.post(
+    "/search",
+    { query },
+    { retryCache: { cache: { methods: ["post"] } } },
+  );
+
+await search("invoices"); // request, answer cached
+await search("invoices"); // from the cache, no request
+await search("tickets"); // different body: request
+await Promise.all([search("orders"), search("orders")]); // one request
 ```
 
 If you write your own `requestKey`, include the body for such requests, or two
@@ -168,7 +200,9 @@ Clear the cache when the user changes, so nothing from the previous user is
 shown. Responses that are still on their way are not stored either:
 
 ```ts
-await client.retryCache.clear();
+await client.get("/me"); // Alice: request, answer cached
+await client.retryCache.clear(); // on logout
+await client.get("/me"); // Bob: request, never Alice's answer
 ```
 
 To keep several users apart in one cache, build on the default key:
@@ -182,6 +216,10 @@ const client = setupAxiosRetryCache(axios.create(), {
     return key && `${currentUserId()} ${key}`;
   },
 });
+
+await client.get("/me"); // Alice: request, cached under Alice's key
+await client.get("/me"); // Bob: request, cached under Bob's key
+await client.get("/me"); // Alice again: from her entry, no request
 ```
 
 Returning `undefined` from `requestKey` excludes a request from cache and
@@ -190,10 +228,14 @@ merging.
 ### Opting single requests out
 
 ```ts
+// up to 5 retries instead of 2
 await client.get("/users", { retryCache: { retry: { retries: 5 } } });
+// never cached, but still retried and merged with a parallel call
 await client.get("/metrics", { retryCache: { cache: false } });
+// never merged with a parallel call, but still cached
 await client.get("/live", { retryCache: { dedupe: false } });
-await client.get("/raw", { retryCache: false }); // straight to the network
+// straight to the network: no cache, no merging, no retry
+await client.get("/raw", { retryCache: false });
 ```
 
 ### Your own storage, with error reporting
