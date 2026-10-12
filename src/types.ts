@@ -15,6 +15,14 @@ export interface RequestKeyContext {
   config: InternalAxiosRequestConfig;
 }
 
+export interface DefaultRequestKeyOptions {
+  /**
+   * Further headers that carry credentials, in addition to `Authorization`,
+   * `Cookie` and `Proxy-Authorization`. Names are matched case-insensitively.
+   */
+  authHeaders?: string[];
+}
+
 export interface CacheOptions {
   enabled?: boolean;
   ttl: number;
@@ -73,7 +81,7 @@ export interface StorageErrorContext {
   error: unknown;
 }
 
-export interface RetryCacheOptions {
+export interface RetryCacheOptions extends DefaultRequestKeyOptions {
   requestKey?: RetryCacheRequestKey;
   cache?: false | Partial<CacheOptions>;
   retry?: false | Partial<RetryOptions>;

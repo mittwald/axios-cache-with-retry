@@ -40,7 +40,7 @@ describe("defaultRequestKey", () => {
     expect(keys.size).toBe(4);
   });
 
-  it("ignores headers, Authorization included", () => {
+  it("separates requests by Authorization", () => {
     expect(
       defaultRequestKey(
         config({
@@ -48,7 +48,7 @@ describe("defaultRequestKey", () => {
           headers: new AxiosHeaders({ Authorization: "Bearer alice" }),
         }),
       ),
-    ).toBe(
+    ).not.toBe(
       defaultRequestKey(
         config({
           url: "/users/self",
@@ -58,7 +58,80 @@ describe("defaultRequestKey", () => {
     );
   });
 
-  it("ignores Cookie and Proxy-Authorization", () => {
+  it("appends a digest of the credentials as the last segment", () => {
+    const key = defaultRequestKey(
+      config({
+        url: "/users/self",
+        headers: new AxiosHeaders({ Authorization: "Bearer alice" }),
+      }),
+    );
+
+    expect(key).toMatch(/^get {2}\/users\/self {3}[0-9a-f]{32}$/);
+    expect(key).not.toContain("alice");
+  });
+
+  it("gives the same credentials the same key, whatever the header casing and order", () => {
+    expect(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          headers: new AxiosHeaders({
+            Authorization: "Bearer alice",
+            Cookie: "session=alice",
+          }),
+        }),
+      ),
+    ).toBe(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          headers: new AxiosHeaders({
+            cookie: "session=alice",
+            authorization: "Bearer alice",
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("treats an empty or false credential header as none", () => {
+    const anonymous = defaultRequestKey(config({ url: "/users/self" }));
+
+    expect(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          headers: new AxiosHeaders({ Authorization: "" }),
+        }),
+      ),
+    ).toBe(anonymous);
+    expect(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          headers: new AxiosHeaders({ Authorization: false }),
+        }),
+      ),
+    ).toBe(anonymous);
+  });
+
+  it("adds authHeaders to the credential headers instead of replacing them", () => {
+    const authHeaders = ["x-api-key"];
+    const keyOf = (headers: Record<string, string>) =>
+      defaultRequestKey(
+        config({ url: "/users/self", headers: new AxiosHeaders(headers) }),
+        { authHeaders },
+      );
+
+    expect(keyOf({ "X-Api-Key": "alice" })).not.toBe(
+      keyOf({ "X-Api-Key": "bob" }),
+    );
+    expect(keyOf({ Authorization: "Bearer alice" })).not.toBe(
+      keyOf({ Authorization: "Bearer bob" }),
+    );
+  });
+
+  it("separates requests by Cookie and Proxy-Authorization", () => {
     const anonymous = defaultRequestKey(config({ url: "/users/self" }));
 
     expect(
@@ -68,7 +141,7 @@ describe("defaultRequestKey", () => {
           headers: new AxiosHeaders({ Cookie: "session=alice" }),
         }),
       ),
-    ).toBe(anonymous);
+    ).not.toBe(anonymous);
     expect(
       defaultRequestKey(
         config({
@@ -78,10 +151,10 @@ describe("defaultRequestKey", () => {
           }),
         }),
       ),
-    ).toBe(anonymous);
+    ).not.toBe(anonymous);
   });
 
-  it("ignores config.auth", () => {
+  it("separates requests by config.auth", () => {
     expect(
       defaultRequestKey(
         config({
@@ -89,7 +162,14 @@ describe("defaultRequestKey", () => {
           auth: { username: "alice", password: "secret" },
         }),
       ),
-    ).toBe(defaultRequestKey(config({ url: "/users/self" })));
+    ).not.toBe(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          auth: { username: "bob", password: "secret" },
+        }),
+      ),
+    );
   });
 
   it("ignores any other header", () => {

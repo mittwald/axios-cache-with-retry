@@ -149,11 +149,27 @@ default key carries the body for every method outside `METHODS_WITHOUT_BODY` in
 may carry a body. A custom key that leaves the body out merges and caches such
 requests across bodies; the tests in "deduplication of writes" pin both sides.
 
-Headers are not part of the default key, `Authorization` included, so an
-instance shared by several users (typically on a server) needs cache and dedupe
-off, which is the default without a window, or a user-aware `requestKey`. The
-README says so under "A server that serves many users"; "the default key" in
-`test/adapter.test.ts` pins it.
+**The default key carries a digest of the credentials.** `defaultRequestKey`
+appends a digest of `Authorization`, `Cookie`, `Proxy-Authorization`, the names
+in `authHeaders` and `config.auth` as its last segment, and only when one of
+them has a value. Keys without credentials stay as in 1.x, and
+`invalidatePrefix` on the start of a key still reaches the entries of every
+user. `config.auth` is read on its own because axios hands it to the adapter as
+it is; only axios' own adapters turn it into a header, after the key is built.
+Every other header stays out of the key. Cookies the browser manages
+(`withCredentials`) never show up in the config, so a user switch with a cookie
+session still needs `clear()`. A custom `requestKey` built on
+`defaultRequestKey` has to pass `{ authHeaders }` itself. "the default key" in
+`test/adapter.test.ts` pins the behaviour.
+
+The digest is cyrb128 (`src/hash.ts`, 128 bits as 32 hex digits). It has to be
+synchronous: `defaultRequestKey` is synchronous API, and `crypto.subtle` is
+async and missing on plain http pages. Width matters more than strength, since a
+collision is exactly a leak between users, while crafting one needs the victim's
+digest, which only the storage holds. `digestOf` in `src/key.ts` memoizes it in
+a module-scoped `Map` keyed by the serialized credentials and bounded to the
+1024 most recently used (`MAX_DIGESTS`): a tab with one token hashes it once,
+and a server does not keep the credentials of every user it has seen.
 
 ---
 
@@ -255,7 +271,8 @@ own errors and rejections, so observing cannot fail a request either.
 their own modules for testing convenience but are not re-exported there, and are
 not API. `defaultRequestKey` and `stableSerialize` are the exception: they are
 re-exported so custom keys can reuse them, and changing their output changes
-every consumer's keys. `test/exports.test.ts` pins the runtime exports.
+every consumer's keys. That includes the hash: `test/hash.test.ts` pins two
+reference values. `test/exports.test.ts` pins the runtime exports.
 
 ---
 
@@ -276,6 +293,10 @@ stubs it back to `undefined` in a `beforeEach`, as `test/server.test.ts` does,
 and `unstubGlobals` in `vitest.config.ts` undoes both before the next test. The
 stub has to be in place when `setupAxiosRetryCache` runs, because that is when
 the defaults are picked.
+
+`test/digest.test.ts` counts how often the hash runs by mocking `src/hash.js`
+with `vi.mock`. The memo in `src/key.ts` lives as long as the module, so each
+test there uses credentials no other test uses.
 
 ---
 

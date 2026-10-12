@@ -7,6 +7,7 @@ export type {
   CachedRequest,
   CachedResponse,
   CacheOptions,
+  DefaultRequestKeyOptions,
   InvalidationTarget,
   RequestKeyContext,
   RetryCacheApi,

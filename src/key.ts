@@ -1,21 +1,34 @@
 import type { InternalAxiosRequestConfig } from "axios";
-import type { CachedRequest, RetryCacheRequestKey } from "./types.js";
+import { cyrb128 } from "./hash.js";
+import type {
+  CachedRequest,
+  DefaultRequestKeyOptions,
+  RetryCacheRequestKey,
+} from "./types.js";
 
 const METHODS_WITHOUT_BODY = ["get", "head"];
+
+const CREDENTIAL_HEADERS = ["authorization", "cookie", "proxy-authorization"];
+
+const MAX_DIGESTS = 1024;
+
+const digests = new Map<string, string>();
 
 export async function resolveRequestKey(
   key: RetryCacheRequestKey | undefined,
   config: InternalAxiosRequestConfig,
+  options: DefaultRequestKeyOptions = {},
 ): Promise<string | undefined> {
   if (typeof key === "function") {
     return key({ config });
   }
 
-  return defaultRequestKey(config);
+  return defaultRequestKey(config, options);
 }
 
 export function defaultRequestKey(
   config: InternalAxiosRequestConfig,
+  options: DefaultRequestKeyOptions = {},
 ): string | undefined {
   const method = (config.method ?? "get").toLowerCase();
   const baseURL = config.baseURL ?? "";
@@ -29,7 +42,66 @@ export function defaultRequestKey(
     return undefined;
   }
 
-  return [method, baseURL, url, params, data].join(" ");
+  const segments = [method, baseURL, url, params, data];
+  const credentials = serializeCredentials(config, options.authHeaders);
+
+  if (credentials !== undefined) {
+    segments.push(digestOf(credentials));
+  }
+
+  return segments.join(" ");
+}
+
+function serializeCredentials(
+  config: InternalAxiosRequestConfig,
+  authHeaders: string[] = [],
+): string | undefined {
+  const names = [
+    ...CREDENTIAL_HEADERS,
+    ...authHeaders.map((name) => name.toLowerCase()),
+  ];
+  const credentials = Object.entries(config.headers ?? {})
+    .filter(
+      ([name, value]) => names.includes(name.toLowerCase()) && hasValue(value),
+    )
+    .map(([name, value]) => JSON.stringify([name.toLowerCase(), value]));
+
+  if (config.auth) {
+    credentials.push(
+      JSON.stringify(["auth", config.auth.username, config.auth.password]),
+    );
+  }
+
+  return credentials.length === 0 ? undefined : credentials.sort().join("\n");
+}
+
+function hasValue(value: unknown): boolean {
+  return (
+    value !== undefined && value !== null && value !== false && value !== ""
+  );
+}
+
+function digestOf(credentials: string): string {
+  const known = digests.get(credentials);
+
+  if (known !== undefined) {
+    digests.delete(credentials);
+    digests.set(credentials, known);
+    return known;
+  }
+
+  const digest = cyrb128(credentials);
+  digests.set(credentials, digest);
+
+  if (digests.size > MAX_DIGESTS) {
+    const oldest = digests.keys().next();
+
+    if (!oldest.done) {
+      digests.delete(oldest.value);
+    }
+  }
+
+  return digest;
 }
 
 export function describeRequest(
