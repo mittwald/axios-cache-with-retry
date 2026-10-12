@@ -102,7 +102,7 @@ export function setupAxiosRetryCache(
 
     const requestKey =
       cache || dedupeEnabled
-        ? await resolveRequestKey(options.requestKey, config)
+        ? await resolveRequestKey(options.requestKey, config, options)
         : undefined;
 
     let adapter = withRetry(originalAdapter, effective.retry);

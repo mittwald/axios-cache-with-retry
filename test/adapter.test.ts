@@ -234,7 +234,7 @@ describe("a custom requestKey in a browser", () => {
 });
 
 describe("the default key", () => {
-  it("gives requests that differ only in their headers one cache entry", async () => {
+  it("gives requests with different Authorization their own cache entries", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) =>
       response(config, 200, config.headers.Authorization),
     );
@@ -249,11 +249,64 @@ describe("the default key", () => {
       headers: { Authorization: "Bearer bob" },
     });
 
-    expect(bob.data).toBe("Bearer alice");
+    expect(bob.data).toBe("Bearer bob");
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("shares a cache entry between requests with the same credentials", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 60_000 },
+    });
+
+    await client.get("/users/self", {
+      headers: { Authorization: "Bearer alice" },
+    });
+    await client.get("/users/self", {
+      headers: { Authorization: "Bearer alice" },
+    });
+
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("merges concurrent requests that differ only in their headers", async () => {
+  it("gives requests with different values of a header in authHeaders their own cache entries", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200, config.headers["X-Api-Key"]),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 60_000 },
+      authHeaders: ["X-Api-Key"],
+    });
+
+    await client.get("/users/self", { headers: { "X-Api-Key": "alice" } });
+    const bob = await client.get("/users/self", {
+      headers: { "X-Api-Key": "bob" },
+    });
+
+    expect(bob.data).toBe("bob");
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("sees credentials set in the instance defaults", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200, config.headers.Authorization),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 60_000 },
+    });
+
+    client.defaults.headers.common.Authorization = "Bearer alice";
+    await client.get("/users/self");
+    client.defaults.headers.common.Authorization = "Bearer bob";
+    const bob = await client.get("/users/self");
+
+    expect(bob.data).toBe("Bearer bob");
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not merge concurrent requests with different Authorization", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) => {
       await new Promise((resolve) => setTimeout(resolve, 5));
       return response(config, 200, config.headers.Authorization);
@@ -271,11 +324,11 @@ describe("the default key", () => {
       }),
     ]);
 
-    expect(bob.data).toBe("Bearer alice");
-    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(bob.data).toBe("Bearer bob");
+    expect(adapter).toHaveBeenCalledTimes(2);
   });
 
-  it("gives requests that differ only in config.auth one cache entry", async () => {
+  it("gives requests with different config.auth their own cache entries", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) =>
       response(config, 200, config.auth?.username),
     );
@@ -290,8 +343,8 @@ describe("the default key", () => {
       auth: { username: "bob", password: "secret" },
     });
 
-    expect(bob.data).toBe("alice");
-    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(bob.data).toBe("bob");
+    expect(adapter).toHaveBeenCalledTimes(2);
   });
 
   it("sees config.auth as it is, without an Authorization header", async () => {
@@ -330,7 +383,7 @@ describe("the default key", () => {
     });
 
     expect(await client.retryCache.invalidatePrefix("get  /users/self")).toBe(
-      1,
+      2,
     );
   });
 });
