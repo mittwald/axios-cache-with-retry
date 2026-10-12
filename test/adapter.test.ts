@@ -9,6 +9,7 @@ import axios, {
 import { describe, expect, it, vi } from "vitest";
 import {
   createMemoryStorage,
+  defaultRequestKey,
   type RequestKeyContext,
   type RetryCacheOptions,
   type RetryCacheStorage,
@@ -250,6 +251,87 @@ describe("the default key", () => {
 
     expect(bob.data).toBe("Bearer alice");
     expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges concurrent requests that differ only in their headers", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return response(config, 200, config.headers.Authorization);
+    });
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+    });
+
+    const [, bob] = await Promise.all([
+      client.get("/users/self", {
+        headers: { Authorization: "Bearer alice" },
+      }),
+      client.get("/users/self", {
+        headers: { Authorization: "Bearer bob" },
+      }),
+    ]);
+
+    expect(bob.data).toBe("Bearer alice");
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives requests that differ only in config.auth one cache entry", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200, config.auth?.username),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 60_000 },
+    });
+
+    await client.get("/users/self", {
+      auth: { username: "alice", password: "secret" },
+    });
+    const bob = await client.get("/users/self", {
+      auth: { username: "bob", password: "secret" },
+    });
+
+    expect(bob.data).toBe("alice");
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("sees config.auth as it is, without an Authorization header", async () => {
+    const seen: unknown[] = [];
+    const client = setupAxiosRetryCache(
+      axios.create({ adapter: async (config) => response(config, 200) }),
+      {
+        requestKey: ({ config }) => {
+          seen.push(config.auth, config.headers.get("Authorization"));
+          return defaultRequestKey(config);
+        },
+      },
+    );
+
+    await client.get("/users/self", {
+      auth: { username: "alice", password: "secret" },
+    });
+
+    expect(seen).toEqual([
+      { username: "alice", password: "secret" },
+      undefined,
+    ]);
+  });
+
+  it("lets invalidatePrefix remove the entries of a url for every user", async () => {
+    const client = setupAxiosRetryCache(
+      axios.create({ adapter: async (config) => response(config, 200) }),
+      { cache: { ttl: 60_000 } },
+    );
+
+    await client.get("/users/self", {
+      headers: { Authorization: "Bearer alice" },
+    });
+    await client.get("/users/self", {
+      headers: { Authorization: "Bearer bob" },
+    });
+
+    expect(await client.retryCache.invalidatePrefix("get  /users/self")).toBe(
+      1,
+    );
   });
 });
 
