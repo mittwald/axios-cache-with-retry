@@ -58,6 +58,69 @@ describe("defaultRequestKey", () => {
     );
   });
 
+  it("ignores Cookie and Proxy-Authorization", () => {
+    const anonymous = defaultRequestKey(config({ url: "/users/self" }));
+
+    expect(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          headers: new AxiosHeaders({ Cookie: "session=alice" }),
+        }),
+      ),
+    ).toBe(anonymous);
+    expect(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          headers: new AxiosHeaders({
+            "Proxy-Authorization": "Basic YWxpY2U6c2VjcmV0",
+          }),
+        }),
+      ),
+    ).toBe(anonymous);
+  });
+
+  it("ignores config.auth", () => {
+    expect(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          auth: { username: "alice", password: "secret" },
+        }),
+      ),
+    ).toBe(defaultRequestKey(config({ url: "/users/self" })));
+  });
+
+  it("ignores any other header", () => {
+    expect(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          headers: new AxiosHeaders({
+            Accept: "application/json",
+            "X-Api-Key": "alice",
+          }),
+        }),
+      ),
+    ).toBe(defaultRequestKey(config({ url: "/users/self" })));
+  });
+
+  it("joins method, base url, url, params and body with spaces", () => {
+    expect(
+      defaultRequestKey(
+        config({
+          method: "post",
+          baseURL: "https://api.test",
+          url: "/users",
+          params: { page: 2 },
+          data: { name: "Ada" },
+        }),
+      ),
+    ).toBe('post https://api.test /users {"page":2} {"name":"Ada"}');
+    expect(defaultRequestKey(config({ url: "/users" }))).toBe("get  /users  ");
+  });
+
   it("ignores the body for get and head but not for other methods", () => {
     const withBody = { url: "/users", data: { name: "Ada" } };
 
