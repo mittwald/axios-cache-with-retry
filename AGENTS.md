@@ -119,9 +119,23 @@ be re-enabled per request by `true` or an explicit `enabled: true`. A partial
 override like `{ cache: { ttl: 5_000 } }` on top of `cache: false` stays off by
 design; it is not a merge bug.
 
+**Without a window, cache and dedupe are off by default.**
+`setupAxiosRetryCache` checks `typeof window === "undefined"` once per call and
+then uses `SERVER_DEFAULTS` from `src/setup.ts`, where `cache.enabled` and
+`dedupe` are `false`; retry stays on. Every runtime without a `window` counts as
+a server, web workers included, and a window that appears or disappears after
+setup changes nothing. Opting in follows the rule above:
+`cache: { enabled: true }` and `dedupe: true`, globally or per request, or
+`cache: true` per request. A config that only sets `cache: { ttl }` stays off on
+purpose, so a 1.x server config stays protected after the upgrade.
+`retryCache: true` turns on cache and retry but not dedupe.
+
 Dedupe is checked after the early return for "neither cache nor retry is
 enabled", so `dedupe: true` on its own does nothing — a request with both
-features off goes straight to the original adapter.
+features off goes straight to the original adapter. The request key is resolved
+only after that return, and only when the cache or dedupe applies to the
+request: a custom `requestKey` is not called for a request that neither caches
+nor merges, which under the server defaults is every request.
 
 Dedupe is also limited to `SAFE_METHODS` in `src/setup.ts`, plus every method
 the cache is enabled for. With retry on, a write enters the operation path even
@@ -137,8 +151,9 @@ requests across bodies; the tests in "deduplication of writes" pin both sides.
 
 Headers are not part of the default key, `Authorization` included, so an
 instance shared by several users (typically on a server) needs cache and dedupe
-off or a user-aware `requestKey`. The README says so under "A server that serves
-many users"; "the default key" in `test/adapter.test.ts` pins it.
+off, which is the default without a window, or a user-aware `requestKey`. The
+README says so under "A server that serves many users"; "the default key" in
+`test/adapter.test.ts` pins it.
 
 ---
 
@@ -254,6 +269,13 @@ mid-test needs the indirection
 `axios.create({ adapter: (config) => activeAdapter(config) })` — see the
 `staleIfError` test. Assert the number of adapter calls, not just the payload;
 nearly every regression in this library shows up as a wrong call count.
+
+`test/vitest.setup.ts` stubs `window` before every test, so the tests run with
+the browser defaults although vitest runs them in node. A test for a server
+stubs it back to `undefined` in a `beforeEach`, as `test/server.test.ts` does,
+and `unstubGlobals` in `vitest.config.ts` undoes both before the next test. The
+stub has to be in place when `setupAxiosRetryCache` runs, because that is when
+the defaults are picked.
 
 ---
 
