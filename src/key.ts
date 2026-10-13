@@ -66,7 +66,10 @@ function serializeCredentials(
     )
     .map(([name, value]) => JSON.stringify([name.toLowerCase(), value]));
 
-  if (config.auth) {
+  if (
+    config.auth &&
+    (hasValue(config.auth.username) || hasValue(config.auth.password))
+  ) {
     credentials.push(
       JSON.stringify(["auth", config.auth.username, config.auth.password]),
     );

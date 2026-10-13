@@ -115,14 +115,14 @@ describe("defaultRequestKey", () => {
     ).toBe(anonymous);
   });
 
-  it("gives an empty config.auth a digest", () => {
+  it("treats an empty config.auth as none", () => {
     const anonymous = defaultRequestKey(config({ url: "/users/self" }));
 
     expect(
       defaultRequestKey(
         config({ url: "/users/self", auth: { username: "", password: "" } }),
       ),
-    ).not.toBe(anonymous);
+    ).toBe(anonymous);
     expect(
       defaultRequestKey(
         config({
@@ -130,7 +130,18 @@ describe("defaultRequestKey", () => {
           auth: {} as InternalAxiosRequestConfig["auth"],
         }),
       ),
-    ).not.toBe(anonymous);
+    ).toBe(anonymous);
+  });
+
+  it("keeps a config.auth with a username but no password", () => {
+    expect(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          auth: { username: "alice", password: "" },
+        }),
+      ),
+    ).not.toBe(defaultRequestKey(config({ url: "/users/self" })));
   });
 
   it("adds authHeaders to the credential headers instead of replacing them", () => {
