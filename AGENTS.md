@@ -127,8 +127,9 @@ a server, web workers included, and a window that appears or disappears after
 setup changes nothing. Opting in follows the rule above:
 `cache: { enabled: true }` and `dedupe: true`, globally or per request, or
 `cache: true` per request. A config that only sets `cache: { ttl }` stays off on
-purpose, so a 1.x server config stays protected after the upgrade.
-`retryCache: true` turns on cache and retry but not dedupe.
+purpose: a 1.x server config like that silently stops caching after the upgrade,
+with no error, instead of going on sharing responses between users. Without a
+window, `retryCache: true` turns on cache and retry but not dedupe.
 
 Dedupe is checked after the early return for "neither cache nor retry is
 enabled", so `dedupe: true` on its own does nothing — a request with both
