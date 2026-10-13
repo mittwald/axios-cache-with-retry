@@ -9,6 +9,7 @@ import axios, {
 import { describe, expect, it, vi } from "vitest";
 import {
   createMemoryStorage,
+  type RequestKeyContext,
   type RetryCacheOptions,
   type RetryCacheStorage,
   setupAxiosRetryCache,
@@ -170,6 +171,42 @@ describe("opting out", () => {
     await client.post("/submit", { name: "Ada" }, accepted);
 
     expect(adapter).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a custom requestKey in a browser", () => {
+  it("is called for a GET the cache applies to", async () => {
+    const requestKey = vi.fn(({ config }: RequestKeyContext) =>
+      String(config.url),
+    );
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      requestKey,
+    });
+
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(requestKey).toHaveBeenCalledTimes(1);
+  });
+
+  it("is not called for a POST outside cache.methods", async () => {
+    const requestKey = vi.fn(({ config }: RequestKeyContext) =>
+      String(config.url),
+    );
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      requestKey,
+    });
+
+    await client.post("/users", { name: "Ada" });
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(requestKey).not.toHaveBeenCalled();
   });
 });
 
