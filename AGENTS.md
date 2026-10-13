@@ -162,14 +162,15 @@ session still needs `clear()`. A custom `requestKey` built on
 `defaultRequestKey` has to pass `{ authHeaders }` itself. "the default key" in
 `test/adapter.test.ts` pins the behaviour.
 
-The digest is cyrb128 (`src/hash.ts`, 128 bits as 32 hex digits). It has to be
-synchronous: `defaultRequestKey` is synchronous API, and `crypto.subtle` is
-async and missing on plain http pages. Width matters more than strength, since a
-collision is exactly a leak between users, while crafting one needs the victim's
-digest, which only the storage holds. `digestOf` in `src/key.ts` memoizes it in
-a module-scoped `Map` keyed by the serialized credentials and bounded to the
-1024 most recently used (`MAX_DIGESTS`): a tab with one token hashes it once,
-and a server does not keep the credentials of every user it has seen.
+The digest has to stay synchronous: `defaultRequestKey` is synchronous API, and
+`crypto.subtle` is async and missing on plain http pages. Width matters more
+than strength, since a collision is exactly a leak between users. The hash is
+fast and unsalted on purpose, so the same credentials give the same key in every
+process and a storage shared between processes keeps working. The price: whoever
+can read the keys of a persistent or shared storage can try passwords against a
+digest offline, which recovers weak Basic-auth passwords, though not a long
+random token. The memo in `digestOf` is bounded so that a server does not keep
+the credentials of every user it has seen.
 
 ---
 
