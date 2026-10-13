@@ -349,15 +349,15 @@ describe("the default key", () => {
 
   it("sees config.auth as it is, without an Authorization header", async () => {
     const seen: unknown[] = [];
-    const client = setupAxiosRetryCache(
-      axios.create({ adapter: async (config) => response(config, 200) }),
-      {
-        requestKey: ({ config }) => {
-          seen.push(config.auth, config.headers.get("Authorization"));
-          return defaultRequestKey(config);
-        },
-      },
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200),
     );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      requestKey: ({ config }) => {
+        seen.push(config.auth, config.headers.get("Authorization"));
+        return defaultRequestKey(config);
+      },
+    });
 
     await client.get("/users/self", {
       auth: { username: "alice", password: "secret" },
@@ -367,24 +367,33 @@ describe("the default key", () => {
       { username: "alice", password: "secret" },
       undefined,
     ]);
+    expect(adapter).toHaveBeenCalledTimes(1);
   });
 
   it("lets invalidatePrefix remove the entries of a url for every user", async () => {
-    const client = setupAxiosRetryCache(
-      axios.create({ adapter: async (config) => response(config, 200) }),
-      { cache: { ttl: 60_000 } },
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200),
     );
-
-    await client.get("/users/self", {
-      headers: { Authorization: "Bearer alice" },
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 60_000 },
     });
-    await client.get("/users/self", {
-      headers: { Authorization: "Bearer bob" },
-    });
+    const alice = { headers: { Authorization: "Bearer alice" } };
+    const bob = { headers: { Authorization: "Bearer bob" } };
 
+    await client.get("/users/self", alice);
+    await client.get("/users/self", bob);
+    await client.get("/users/self", alice);
+    await client.get("/users/self", bob);
+
+    expect(adapter).toHaveBeenCalledTimes(2);
     expect(await client.retryCache.invalidatePrefix("get  /users/self")).toBe(
       2,
     );
+
+    await client.get("/users/self", alice);
+    await client.get("/users/self", bob);
+
+    expect(adapter).toHaveBeenCalledTimes(4);
   });
 });
 
