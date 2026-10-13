@@ -115,6 +115,24 @@ describe("defaultRequestKey", () => {
     ).toBe(anonymous);
   });
 
+  it("gives an empty config.auth a digest", () => {
+    const anonymous = defaultRequestKey(config({ url: "/users/self" }));
+
+    expect(
+      defaultRequestKey(
+        config({ url: "/users/self", auth: { username: "", password: "" } }),
+      ),
+    ).not.toBe(anonymous);
+    expect(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          auth: {} as InternalAxiosRequestConfig["auth"],
+        }),
+      ),
+    ).not.toBe(anonymous);
+  });
+
   it("adds authHeaders to the credential headers instead of replacing them", () => {
     const authHeaders = ["x-api-key"];
     const keyOf = (headers: Record<string, string>) =>
