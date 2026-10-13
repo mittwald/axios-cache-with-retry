@@ -1,4 +1,5 @@
 import { isDead } from "./cache.js";
+import { touch, trim } from "./lru.js";
 import type {
   Awaitable,
   CacheEntry,
@@ -26,18 +27,16 @@ export class MemoryRetryCacheStorage<
     const entry = this.entries.get(key);
 
     if (entry) {
-      this.entries.delete(key);
-      this.entries.set(key, entry);
+      touch(this.entries, key, entry);
     }
 
     return entry;
   }
 
   set(key: string, entry: CacheEntry<T>): void {
-    this.entries.delete(key);
-    this.entries.set(key, entry);
+    touch(this.entries, key, entry);
     this.sweep();
-    this.enforceMaxEntries();
+    trim(this.entries, this.options.maxEntries ?? DEFAULT_MAX_ENTRIES);
   }
 
   delete(key: string): boolean {
@@ -78,27 +77,6 @@ export class MemoryRetryCacheStorage<
       if (isDead(entry, now)) {
         this.entries.delete(key);
       }
-    }
-  }
-
-  private enforceMaxEntries(): void {
-    const maxEntries = this.options.maxEntries ?? DEFAULT_MAX_ENTRIES;
-
-    if (this.entries.size <= maxEntries) {
-      return;
-    }
-
-    const overflow = this.entries.size - maxEntries;
-    const keys = this.entries.keys();
-
-    for (let index = 0; index < overflow; index += 1) {
-      const next = keys.next();
-
-      if (next.done) {
-        return;
-      }
-
-      this.entries.delete(next.value);
     }
   }
 }

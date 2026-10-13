@@ -1,5 +1,6 @@
 import type { InternalAxiosRequestConfig } from "axios";
 import { cyrb128 } from "./hash.js";
+import { touch, trim } from "./lru.js";
 import type {
   CachedRequest,
   DefaultRequestKeyOptions,
@@ -85,24 +86,10 @@ function hasValue(value: unknown): boolean {
 }
 
 function digestOf(credentials: string): string {
-  const known = digests.get(credentials);
+  const digest = digests.get(credentials) ?? cyrb128(credentials);
 
-  if (known !== undefined) {
-    digests.delete(credentials);
-    digests.set(credentials, known);
-    return known;
-  }
-
-  const digest = cyrb128(credentials);
-  digests.set(credentials, digest);
-
-  if (digests.size > MAX_DIGESTS) {
-    const oldest = digests.keys().next();
-
-    if (!oldest.done) {
-      digests.delete(oldest.value);
-    }
-  }
+  touch(digests, credentials, digest);
+  trim(digests, MAX_DIGESTS);
 
   return digest;
 }
