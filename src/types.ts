@@ -81,8 +81,13 @@ export interface StorageErrorContext {
   error: unknown;
 }
 
-export interface RetryCacheOptions extends DefaultRequestKeyOptions {
+export interface RetryCacheOptions {
   requestKey?: RetryCacheRequestKey;
+  /**
+   * Further credential headers for the default key, for every request of this
+   * instance. See {@link DefaultRequestKeyOptions.authHeaders}.
+   */
+  authHeaders?: string[];
   cache?: false | Partial<CacheOptions>;
   retry?: false | Partial<RetryOptions>;
   dedupe?: boolean;
