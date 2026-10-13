@@ -17,6 +17,10 @@ function response(
   };
 }
 
+function okAdapter() {
+  return vi.fn<AxiosAdapter>(async (config) => response(config, 200));
+}
+
 /** Answers after 5 ms, so that requests started together overlap */
 function slowAdapter() {
   return vi.fn<AxiosAdapter>(async (config) => {
@@ -35,9 +39,7 @@ describe("without a window", () => {
   });
 
   it("does not cache GET responses by default", async () => {
-    const adapter = vi.fn<AxiosAdapter>(async (config) =>
-      response(config, 200),
-    );
+    const adapter = okAdapter();
     const client = setupAxiosRetryCache(axios.create({ adapter }));
 
     await client.get("/users");
@@ -58,9 +60,7 @@ describe("without a window", () => {
   });
 
   it("does not cache with a cache option that only sets the ttl", async () => {
-    const adapter = vi.fn<AxiosAdapter>(async (config) =>
-      response(config, 200),
-    );
+    const adapter = okAdapter();
     const client = setupAxiosRetryCache(axios.create({ adapter }), {
       cache: { ttl: 10_000 },
     });
@@ -72,9 +72,7 @@ describe("without a window", () => {
   });
 
   it("does not cache a request that only sets a ttl", async () => {
-    const adapter = vi.fn<AxiosAdapter>(async (config) =>
-      response(config, 200),
-    );
+    const adapter = okAdapter();
     const client = setupAxiosRetryCache(axios.create({ adapter }));
 
     await client.get("/users", { retryCache: { cache: { ttl: 10_000 } } });
@@ -84,9 +82,7 @@ describe("without a window", () => {
   });
 
   it("caches with cache: { enabled: true }", async () => {
-    const adapter = vi.fn<AxiosAdapter>(async (config) =>
-      response(config, 200),
-    );
+    const adapter = okAdapter();
     const client = setupAxiosRetryCache(axios.create({ adapter }), {
       cache: { enabled: true },
     });
@@ -98,9 +94,7 @@ describe("without a window", () => {
   });
 
   it("caches a request that opts in with cache: true", async () => {
-    const adapter = vi.fn<AxiosAdapter>(async (config) =>
-      response(config, 200),
-    );
+    const adapter = okAdapter();
     const client = setupAxiosRetryCache(axios.create({ adapter }));
 
     await client.get("/users", { retryCache: { cache: true } });
@@ -110,9 +104,7 @@ describe("without a window", () => {
   });
 
   it("caches a request that opts in with cache: { enabled: true }", async () => {
-    const adapter = vi.fn<AxiosAdapter>(async (config) =>
-      response(config, 200),
-    );
+    const adapter = okAdapter();
     const client = setupAxiosRetryCache(axios.create({ adapter }));
     const retryCache = { cache: { enabled: true } };
 
@@ -177,44 +169,48 @@ describe("without a window", () => {
 
   it("does not call a custom requestKey by default", async () => {
     const requestKey = urlKey();
-    const client = setupAxiosRetryCache(
-      axios.create({ adapter: async (config) => response(config, 200) }),
-      { requestKey },
-    );
+    const adapter = okAdapter();
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      requestKey,
+    });
 
     await client.get("/users");
 
+    expect(adapter).toHaveBeenCalledTimes(1);
     expect(requestKey).not.toHaveBeenCalled();
   });
 
   it("does not call a custom requestKey with cache: false and dedupe: false", async () => {
     const requestKey = urlKey();
-    const client = setupAxiosRetryCache(
-      axios.create({ adapter: async (config) => response(config, 200) }),
-      { cache: false, dedupe: false, requestKey },
-    );
+    const adapter = okAdapter();
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      dedupe: false,
+      requestKey,
+    });
 
     await client.get("/users");
 
+    expect(adapter).toHaveBeenCalledTimes(1);
     expect(requestKey).not.toHaveBeenCalled();
   });
 
   it("calls a custom requestKey once dedupe is on", async () => {
     const requestKey = urlKey();
-    const client = setupAxiosRetryCache(
-      axios.create({ adapter: async (config) => response(config, 200) }),
-      { dedupe: true, requestKey },
-    );
+    const adapter = okAdapter();
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      dedupe: true,
+      requestKey,
+    });
 
     await client.get("/users");
 
+    expect(adapter).toHaveBeenCalledTimes(1);
     expect(requestKey).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the server defaults when a window appears after setup", async () => {
-    const adapter = vi.fn<AxiosAdapter>(async (config) =>
-      response(config, 200),
-    );
+    const adapter = okAdapter();
     const client = setupAxiosRetryCache(axios.create({ adapter }));
     vi.stubGlobal("window", globalThis);
 
@@ -226,9 +222,7 @@ describe("without a window", () => {
 
   it("keeps the browser defaults when the window disappears after setup", async () => {
     vi.stubGlobal("window", globalThis);
-    const adapter = vi.fn<AxiosAdapter>(async (config) =>
-      response(config, 200),
-    );
+    const adapter = okAdapter();
     const client = setupAxiosRetryCache(axios.create({ adapter }));
     vi.stubGlobal("window", undefined);
 
