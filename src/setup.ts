@@ -23,17 +23,17 @@ const DEFAULT_CACHE: CacheOptions = {
 
 const SAFE_METHODS = ["get", "head", "options"];
 
-interface Defaults {
+interface RuntimeDefaults {
   cache: CacheOptions;
   dedupe: boolean;
 }
 
-const BROWSER_DEFAULTS: Defaults = {
+const BROWSER_DEFAULTS: RuntimeDefaults = {
   cache: DEFAULT_CACHE,
   dedupe: true,
 };
 
-const SERVER_DEFAULTS: Defaults = {
+const SERVER_DEFAULTS: RuntimeDefaults = {
   cache: { ...DEFAULT_CACHE, enabled: false },
   dedupe: false,
 };
@@ -55,8 +55,16 @@ export function setupAxiosRetryCache(
   options: RetryCacheOptions = {},
 ): AxiosRetryCacheInstance {
   assertValidRetry(options.retry);
-  const defaults =
+  const runtimeDefaults =
     typeof window === "undefined" ? SERVER_DEFAULTS : BROWSER_DEFAULTS;
+  const globalOptions: RetryCacheOptions = {
+    ...options,
+    cache:
+      options.cache === false
+        ? false
+        : { ...runtimeDefaults.cache, ...definedOptions(options.cache) },
+    dedupe: options.dedupe ?? runtimeDefaults.dedupe,
+  };
   const storage = options.storage ?? createMemoryStorage();
   const originalAdapter =
     installedAdapters.get(instance) ??
@@ -73,11 +81,7 @@ export function setupAxiosRetryCache(
       return originalAdapter(config);
     }
 
-    const effective = resolveEffectiveOptions(
-      options,
-      requestOptions,
-      defaults,
-    );
+    const effective = resolveEffectiveOptions(globalOptions, requestOptions);
     const method = (config.method ?? "get").toLowerCase();
     const cache =
       effective.cache && methodAllowed(method, effective.cache.methods)
@@ -122,7 +126,7 @@ export function setupAxiosRetryCache(
       return storage.get(key);
     },
     async set(key, response, setOptions = {}) {
-      const cache = normalizeCacheOptions(options.cache, defaults.cache);
+      const cache = normalizeCacheOptions(globalOptions.cache);
       await storage.set(key, {
         key,
         ...entryLifetime(cache, setOptions.ttl),
@@ -155,8 +159,7 @@ export function setupAxiosRetryCache(
 
 function resolveEffectiveOptions(
   globalOptions: RetryCacheOptions,
-  requestOptions: boolean | RetryCacheRequestOptions | undefined,
-  defaults: Defaults,
+  requestOptions?: boolean | RetryCacheRequestOptions,
 ): {
   cache: CacheOptions | false;
   retry: RetryOptions | false;
@@ -171,7 +174,6 @@ function resolveEffectiveOptions(
   const cache = resolveCacheOptions(
     globalOptions.cache,
     requestOverrides?.cache,
-    defaults.cache,
   );
   const retry = resolveRetryOptions(
     globalOptions.retry,
@@ -181,14 +183,13 @@ function resolveEffectiveOptions(
   return {
     cache,
     retry,
-    dedupe: requestOverrides?.dedupe ?? globalOptions.dedupe ?? defaults.dedupe,
+    dedupe: requestOverrides?.dedupe ?? globalOptions.dedupe ?? true,
   };
 }
 
 function resolveCacheOptions(
   globalCache: RetryCacheOptions["cache"],
   requestCache: RetryCacheRequestOptions["cache"],
-  defaults: CacheOptions,
 ): CacheOptions | false {
   if (requestCache === false) {
     return false;
@@ -196,7 +197,7 @@ function resolveCacheOptions(
 
   if (requestCache === true) {
     return {
-      ...normalizeCacheOptions(globalCache, defaults),
+      ...normalizeCacheOptions(globalCache),
       enabled: true,
     };
   }
@@ -209,7 +210,7 @@ function resolveCacheOptions(
   }
 
   const cache = {
-    ...normalizeCacheOptions(globalCache, defaults),
+    ...normalizeCacheOptions(globalCache),
     ...definedOptions(requestCache),
   };
 
@@ -265,10 +266,9 @@ function assertValidRetry(
 
 function normalizeCacheOptions(
   cache: RetryCacheOptions["cache"],
-  defaults: CacheOptions,
 ): CacheOptions {
   return {
-    ...defaults,
+    ...DEFAULT_CACHE,
     ...definedOptions(cache),
   };
 }
