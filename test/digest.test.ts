@@ -42,6 +42,19 @@ describe("the digest of the credentials", () => {
     expect(cyrb128).toHaveBeenCalledTimes(1);
   });
 
+  it("is kept after 1023 other credentials were used since", () => {
+    keyFor("dave");
+
+    for (let index = 0; index < 1023; index += 1) {
+      keyFor(`dave-${index}`);
+    }
+
+    vi.mocked(cyrb128).mockClear();
+    keyFor("dave");
+
+    expect(cyrb128).not.toHaveBeenCalled();
+  });
+
   it("is kept while it is among the 1024 most recently used", () => {
     keyFor("carol");
 
