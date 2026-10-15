@@ -69,10 +69,10 @@ property for managing the cache.
 
 1. **A key is built** from method, base URL, URL, `params` and, for methods
    other than `GET` and `HEAD`, the body. If the request carries credentials
-   (`Authorization`, `Cookie`, `Proxy-Authorization`, `config.auth` or a header
-   named in `authHeaders`), a digest of them is added, so different users get
-   different keys. Other headers are not part of the key. Requests with the same
-   key count as the same request. The key is only built when the cache or
+   (`Authorization`, `Cookie`, `Proxy-Authorization` and `config.auth`, plus any
+   header named in `authHeaders`), a digest of them is added, so different users
+   get different keys. Other headers are not part of the key. Requests with the
+   same key count as the same request. The key is only built when the cache or
    merging applies to the request.
 2. **Fresh entry in the cache?** Then that is the answer, no request is sent.
 3. **The same request already running?** Then this caller waits for it and gets
@@ -359,13 +359,13 @@ above `maxDelay` is cut to it.
 
 ### `requestKey`, `authHeaders`, `dedupe`, `storage`, `onStorageError`
 
-| Option           | Default                                         | Description                                                                                                                                                               |
-| ---------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `requestKey`     | `defaultRequestKey`                             | Function of `{ config, authHeaders }`; `undefined` excludes a request. Only called when the cache or merging applies                                                      |
-| `authHeaders`    | none                                            | Further headers that carry credentials, for every request of the instance, in addition to `Authorization`, `Cookie` and `Proxy-Authorization`; matched case-insensitively |
-| `dedupe`         | `true` in a browser, `false` without a `window` | Merge identical reads that run at the same time                                                                                                                           |
-| `storage`        | `createMemoryStorage()`                         | Where entries live                                                                                                                                                        |
-| `onStorageError` | none                                            | Called with `{ operation, key, error }` when the storage fails                                                                                                            |
+| Option           | Default                                         | Description                                                                                                                                                                                                                |
+| ---------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requestKey`     | `defaultRequestKey`                             | Function of `{ config, authHeaders }`; `undefined` excludes a request. Only called when the cache or merging applies                                                                                                       |
+| `authHeaders`    | `[]`                                            | Headers that carry credentials besides `Authorization`, `Cookie` and `Proxy-Authorization`, which are always part of the key, like `config.auth`. Applies to every request of the instance; names match case-insensitively |
+| `dedupe`         | `true` in a browser, `false` without a `window` | Merge identical reads that run at the same time                                                                                                                                                                            |
+| `storage`        | `createMemoryStorage()`                         | Where entries live                                                                                                                                                                                                         |
+| `onStorageError` | none                                            | Called with `{ operation, key, error }` when the storage fails                                                                                                                                                             |
 
 `defaultRequestKey(config, { authHeaders })` and `stableSerialize(value)` are
 exported for custom keys. A custom key built on `defaultRequestKey` has to pass
