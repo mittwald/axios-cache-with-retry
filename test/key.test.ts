@@ -221,7 +221,7 @@ describe("defaultRequestKey", () => {
     ).toMatch(/^get https:\/\/api\.test\/v1 \/users {3}[0-9a-f]{32}$/);
   });
 
-  it("drops the standard credential headers when one frozen list serves as authHeaders and authParams", () => {
+  it("keeps the standard credential headers when one frozen list serves as authHeaders and authParams", () => {
     const shared = Object.freeze(["x-api-key"]);
     const keyOf = (authorization: string) =>
       defaultRequestKey(
@@ -232,7 +232,8 @@ describe("defaultRequestKey", () => {
         { authHeaders: shared, authParams: shared },
       );
 
-    expect(keyOf("Bearer alice")).toBe(keyOf("Bearer bob"));
+    expect(keyOf("Bearer alice")).not.toBe(keyOf("Bearer bob"));
+    expect(keyOf("Bearer alice")).toMatch(/^get {2}\/users {3}[0-9a-f]{32}$/);
   });
 
   it("adds authParams to access_token instead of replacing it", () => {
