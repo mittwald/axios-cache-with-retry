@@ -51,8 +51,8 @@ That is all it takes for sensible defaults:
 - Identical requests that run at the same time are sent once and share the
   answer.
 - `GET`, `HEAD` and `OPTIONS` are retried twice on network errors and on 408,
-  425, 429 and 5xx, with growing pauses (or as long as `Retry-After` says, up to
-  30 s).
+  425, 429, 500, 502, 503 and 504, with growing pauses (or as long as
+  `Retry-After` says, up to 30 s).
 
 `setupAxiosRetryCache` returns the same instance with an added `retryCache`
 property for managing the cache.
@@ -270,7 +270,8 @@ const client = setupAxiosRetryCache(axios.create(), {
 });
 ```
 
-`keys` is optional; `invalidatePrefix` and `invalidateWhere` need it.
+`keys` and `deletePrefix` are optional; `invalidateWhere` needs `keys`,
+`invalidatePrefix` needs `deletePrefix` or `keys`.
 
 ## Reference
 
@@ -359,7 +360,7 @@ Entries written by 1.0.x pass only `key` to `invalidateWhere`.
 - **Headers are not part of the default key.** See
   [A server that serves many users](#a-server-that-serves-many-users).
 - **Writes are never merged**, whatever their key: two `POST`s are two intended
-  operations.
+  operations, unless you opted them in via `cache.methods`.
 - **Only 2xx responses are cached** unless `shouldCache` says otherwise, also
   under `validateStatus: () => true`.
 - **Retries look at responses and thrown errors alike**, so they work the same
