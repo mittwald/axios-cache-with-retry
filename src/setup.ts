@@ -71,8 +71,8 @@ export function setupAxiosRetryCache(
     dedupe: options.dedupe ?? runtimeDefaults.dedupe,
   };
   const keyOptions = {
-    authHeaders: options.authHeaders,
-    authParams: options.authParams,
+    authHeaders: Object.freeze([...(options.authHeaders ?? [])]),
+    authParams: Object.freeze([...(options.authParams ?? [])]),
   };
   const storage = options.storage ?? createMemoryStorage();
   const originalAdapter =

@@ -348,7 +348,7 @@ describe("the default key", () => {
     expect([...storage.keys()].join("\n")).not.toMatch(/alice|bob/);
   });
 
-  it("hands a custom key the very authHeaders and authParams arrays of the setup", async () => {
+  it("hands a custom key frozen copies of the authHeaders and authParams of the setup", async () => {
     const authHeaders = ["X-Api-Key"];
     const authParams = ["api_key"];
     const seen: RequestKeyContext[] = [];
@@ -368,8 +368,12 @@ describe("the default key", () => {
 
     await client.get("/users");
 
-    expect(seen[0]?.authHeaders).toBe(authHeaders);
-    expect(seen[0]?.authParams).toBe(authParams);
+    expect(seen[0]?.authHeaders).not.toBe(authHeaders);
+    expect(seen[0]?.authParams).not.toBe(authParams);
+    expect(seen[0]?.authHeaders).toEqual(authHeaders);
+    expect(seen[0]?.authParams).toEqual(authParams);
+    expect(Object.isFrozen(seen[0]?.authHeaders)).toBe(true);
+    expect(Object.isFrozen(seen[0]?.authParams)).toBe(true);
   });
 
   it("hands a custom key the authHeaders and authParams of the setup", async () => {
