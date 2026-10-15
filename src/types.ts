@@ -92,6 +92,12 @@ export interface StorageErrorContext {
 }
 
 export interface RetryCacheOptions {
+  /**
+   * Which defaults apply: `"server"` keeps cache and dedupe off until they are
+   * turned on, `"browser"` has them on. Without it, a missing `window` means
+   * `"server"`. Anything else throws.
+   */
+  runtime?: "browser" | "server";
   requestKey?: RetryCacheRequestKey;
   /**
    * Further credential headers for the default key, for every request of this

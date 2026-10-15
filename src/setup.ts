@@ -60,8 +60,11 @@ export function setupAxiosRetryCache(
   options: RetryCacheOptions = {},
 ): AxiosRetryCacheInstance {
   assertValidRetry(options.retry);
+  assertValidRuntime(options.runtime);
+  const runtime =
+    options.runtime ?? (typeof window === "undefined" ? "server" : "browser");
   const runtimeDefaults =
-    typeof window === "undefined" ? SERVER_DEFAULTS : BROWSER_DEFAULTS;
+    runtime === "server" ? SERVER_DEFAULTS : BROWSER_DEFAULTS;
   const resolvedGlobals: ResolvedGlobals = {
     ...options,
     cache:
@@ -269,6 +272,14 @@ function assertValidRetry(
   ) {
     throw new TypeError(
       `retry.maxDelay must be a number >= 0 or Infinity, got ${String(maxDelay)}`,
+    );
+  }
+}
+
+function assertValidRuntime(runtime: RetryCacheOptions["runtime"]): void {
+  if (runtime !== undefined && runtime !== "browser" && runtime !== "server") {
+    throw new TypeError(
+      `runtime must be "browser" or "server", got ${String(runtime)}`,
     );
   }
 }
