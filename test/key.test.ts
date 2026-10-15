@@ -70,6 +70,24 @@ describe("defaultRequestKey", () => {
     expect(key).not.toContain("alice");
   });
 
+  it("gives a text body that ends in a digest the key of those credentials", () => {
+    const withCredentials = defaultRequestKey(
+      config({
+        method: "post",
+        url: "/search",
+        data: "q",
+        headers: new AxiosHeaders({ Authorization: "Bearer victim" }),
+      }),
+    );
+    const digest = withCredentials?.split(" ").at(-1);
+
+    expect(
+      defaultRequestKey(
+        config({ method: "post", url: "/search", data: `q ${digest}` }),
+      ),
+    ).toBe(withCredentials);
+  });
+
   it("gives the same credentials the same key, whatever the header casing and order", () => {
     expect(
       defaultRequestKey(
