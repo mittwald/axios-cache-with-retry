@@ -245,3 +245,51 @@ describe("without a window", () => {
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("the runtime option", () => {
+  it("applies the server defaults with a window when it is server", async () => {
+    const adapter = slowAdapter();
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      runtime: "server",
+    });
+
+    await Promise.all([client.get("/users"), client.get("/users")]);
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(3);
+  });
+
+  it("applies the browser defaults without a window when it is browser", async () => {
+    vi.stubGlobal("window", undefined);
+    const adapter = slowAdapter();
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      runtime: "browser",
+    });
+
+    await Promise.all([client.get("/users"), client.get("/users")]);
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("still lets the other options win over its defaults", async () => {
+    const adapter = okAdapter();
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      runtime: "server",
+      cache: { enabled: true },
+    });
+
+    await client.get("/users");
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws for any other value", () => {
+    expect(() =>
+      setupAxiosRetryCache(axios.create(), {
+        runtime: "worker" as unknown as "server",
+      }),
+    ).toThrow(TypeError);
+  });
+});
