@@ -68,11 +68,14 @@ export function defaultRequestKey(
   return segments.join(" ");
 }
 
-const lowercased = new WeakMap<readonly string[], readonly string[]>();
+const mergedNames = new WeakMap<
+  readonly string[],
+  WeakMap<readonly string[], readonly string[]>
+>();
 
 /**
- * The default names plus the given ones; computed once for a frozen list, which
- * is what setupAxiosRetryCache passes for every request
+ * The default names plus the given ones; computed once per default list for a
+ * frozen list, which is what setupAxiosRetryCache passes for every request
  */
 function withDefaults(
   defaults: readonly string[],
@@ -83,7 +86,10 @@ function withDefaults(
     return defaults;
   }
 
-  const known = Object.isFrozen(names) ? lowercased.get(names) : undefined;
+  const memo = Object.isFrozen(names)
+    ? (mergedNames.get(defaults) ?? new WeakMap())
+    : undefined;
+  const known = memo?.get(names);
 
   if (known) {
     return known;
@@ -91,8 +97,9 @@ function withDefaults(
 
   const all = [...defaults, ...names.map(normalize)];
 
-  if (Object.isFrozen(names)) {
-    lowercased.set(names, all);
+  if (memo) {
+    memo.set(names, all);
+    mergedNames.set(defaults, memo);
   }
 
   return all;
