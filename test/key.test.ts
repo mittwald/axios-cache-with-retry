@@ -115,7 +115,7 @@ describe("defaultRequestKey", () => {
     ).toBe(anonymous);
   });
 
-  it("counts an empty array in a credential header as a credential", () => {
+  it("treats an empty array in a credential header as none", () => {
     const anonymous = defaultRequestKey(config({ url: "/users/self" }));
 
     for (const cookie of [[], [""]]) {
@@ -126,8 +126,19 @@ describe("defaultRequestKey", () => {
             headers: new AxiosHeaders({ Cookie: cookie }),
           }),
         ),
-      ).not.toBe(anonymous);
+      ).toBe(anonymous);
     }
+  });
+
+  it("keeps an array with a value in a credential header", () => {
+    expect(
+      defaultRequestKey(
+        config({
+          url: "/users/self",
+          headers: new AxiosHeaders({ Cookie: ["", "session=alice"] }),
+        }),
+      ),
+    ).not.toBe(defaultRequestKey(config({ url: "/users/self" })));
   });
 
   it("treats an empty config.auth as none", () => {
