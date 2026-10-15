@@ -192,7 +192,27 @@ describe("a custom requestKey in a browser", () => {
     expect(requestKey).toHaveBeenCalledTimes(1);
   });
 
-  it("is not called for a POST outside cache.methods", async () => {
+  it.each(["post", "put", "patch", "delete"])(
+    "is not called for a %s outside cache.methods",
+    async (method) => {
+      const requestKey = vi.fn(({ config }: RequestKeyContext) =>
+        String(config.url),
+      );
+      const adapter = vi.fn<AxiosAdapter>(async (config) =>
+        response(config, 200),
+      );
+      const client = setupAxiosRetryCache(axios.create({ adapter }), {
+        requestKey,
+      });
+
+      await client.request({ method, url: "/users", data: { name: "Ada" } });
+
+      expect(adapter).toHaveBeenCalledTimes(1);
+      expect(requestKey).not.toHaveBeenCalled();
+    },
+  );
+
+  it("is not called with cache: false and retry: false", async () => {
     const requestKey = vi.fn(({ config }: RequestKeyContext) =>
       String(config.url),
     );
@@ -200,10 +220,12 @@ describe("a custom requestKey in a browser", () => {
       response(config, 200),
     );
     const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: false,
+      retry: false,
       requestKey,
     });
 
-    await client.post("/users", { name: "Ada" });
+    await client.get("/users");
 
     expect(adapter).toHaveBeenCalledTimes(1);
     expect(requestKey).not.toHaveBeenCalled();
