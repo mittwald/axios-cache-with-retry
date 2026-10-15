@@ -149,18 +149,25 @@ default key carries the body for every method outside `METHODS_WITHOUT_BODY` in
 may carry a body. A custom key that leaves the body out merges and caches such
 requests across bodies; the tests in "deduplication of writes" pin both sides.
 
-**The default key carries a digest of the credentials.** `defaultRequestKey`
-appends a digest of `Authorization`, `Cookie`, `Proxy-Authorization`, the names
-in `authHeaders` and `config.auth` as its last segment, and only when one of
-them has a value. Keys without credentials stay as in 1.x, and
+**The default key carries a digest of the credentials** as its last segment: the
+headers in `CREDENTIAL_HEADERS` and `authHeaders` plus `config.auth`, and only
+when one of them has a value. Keys without credentials stay as in 1.x, so
 `invalidatePrefix` on the start of a key still reaches the entries of every
 user. `config.auth` is read on its own because axios hands it to the adapter as
 it is; only axios' own adapters turn it into a header, after the key is built.
-Every other header stays out of the key. Cookies the browser manages
-(`withCredentials`) never show up in the config, so a user switch with a cookie
-session still needs `clear()`. A custom `requestKey` built on
-`defaultRequestKey` has to pass `{ authHeaders }` itself. "the default key" in
+Cookies the browser manages (`withCredentials`) never show up in the config, so
+a user switch with a cookie session still needs `clear()`. A custom `requestKey`
+built on `defaultRequestKey` has to pass on the `authHeaders` from its context,
+or the names they add stay out of its keys. "the default key" in
 `test/adapter.test.ts` pins the behaviour.
+
+**The key is not unambiguous.** Its segments are joined with spaces and a string
+body goes in unquoted, so a request without credentials whose text body ends in
+a space and someone's digest gets that person's key ("gives a text body that
+ends in a digest the key of those credentials" in `test/key.test.ts`). Escaping
+string bodies would close this but change keys without credentials, which have
+to stay as they are. Crafting such a body needs the victim's digest, which only
+the storage holds.
 
 The digest has to stay synchronous: `defaultRequestKey` is synchronous API, and
 `crypto.subtle` is async and missing on plain http pages. Width matters more
