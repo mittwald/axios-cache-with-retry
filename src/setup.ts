@@ -38,6 +38,11 @@ const SERVER_DEFAULTS: RuntimeDefaults = {
   dedupe: false,
 };
 
+interface ResolvedGlobals extends RetryCacheOptions {
+  cache: CacheOptions | false;
+  dedupe: boolean;
+}
+
 const DEFAULT_RETRY: RetryOptions = {
   enabled: true,
   retries: 2,
@@ -57,12 +62,12 @@ export function setupAxiosRetryCache(
   assertValidRetry(options.retry);
   const runtimeDefaults =
     typeof window === "undefined" ? SERVER_DEFAULTS : BROWSER_DEFAULTS;
-  const globalOptions: RetryCacheOptions = {
+  const resolvedGlobals: ResolvedGlobals = {
     ...options,
     cache:
       options.cache === false
         ? false
-        : { ...runtimeDefaults.cache, ...definedOptions(options.cache) },
+        : normalizeCacheOptions(options.cache, runtimeDefaults.cache),
     dedupe: options.dedupe ?? runtimeDefaults.dedupe,
   };
   const storage = options.storage ?? createMemoryStorage();
@@ -81,7 +86,7 @@ export function setupAxiosRetryCache(
       return originalAdapter(config);
     }
 
-    const effective = resolveEffectiveOptions(globalOptions, requestOptions);
+    const effective = resolveEffectiveOptions(resolvedGlobals, requestOptions);
     const method = (config.method ?? "get").toLowerCase();
     const cache =
       effective.cache && methodAllowed(method, effective.cache.methods)
@@ -126,7 +131,7 @@ export function setupAxiosRetryCache(
       return storage.get(key);
     },
     async set(key, response, setOptions = {}) {
-      const cache = normalizeCacheOptions(globalOptions.cache);
+      const cache = normalizeCacheOptions(resolvedGlobals.cache);
       await storage.set(key, {
         key,
         ...entryLifetime(cache, setOptions.ttl),
@@ -158,7 +163,7 @@ export function setupAxiosRetryCache(
 }
 
 function resolveEffectiveOptions(
-  globalOptions: RetryCacheOptions,
+  globalOptions: ResolvedGlobals,
   requestOptions?: boolean | RetryCacheRequestOptions,
 ): {
   cache: CacheOptions | false;
@@ -183,7 +188,7 @@ function resolveEffectiveOptions(
   return {
     cache,
     retry,
-    dedupe: requestOverrides?.dedupe ?? globalOptions.dedupe ?? true,
+    dedupe: requestOverrides?.dedupe ?? globalOptions.dedupe,
   };
 }
 
@@ -266,9 +271,10 @@ function assertValidRetry(
 
 function normalizeCacheOptions(
   cache: RetryCacheOptions["cache"],
+  base: CacheOptions = DEFAULT_CACHE,
 ): CacheOptions {
   return {
-    ...DEFAULT_CACHE,
+    ...base,
     ...definedOptions(cache),
   };
 }
