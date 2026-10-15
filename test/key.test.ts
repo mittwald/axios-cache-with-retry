@@ -221,6 +221,20 @@ describe("defaultRequestKey", () => {
     ).toMatch(/^get https:\/\/api\.test\/v1 \/users {3}[0-9a-f]{32}$/);
   });
 
+  it("drops the standard credential headers when one frozen list serves as authHeaders and authParams", () => {
+    const shared = Object.freeze(["x-api-key"]);
+    const keyOf = (authorization: string) =>
+      defaultRequestKey(
+        config({
+          url: "/users",
+          headers: new AxiosHeaders({ Authorization: authorization }),
+        }),
+        { authHeaders: shared, authParams: shared },
+      );
+
+    expect(keyOf("Bearer alice")).toBe(keyOf("Bearer bob"));
+  });
+
   it("adds authParams to access_token instead of replacing it", () => {
     const keyOf = (params: Record<string, string>) =>
       defaultRequestKey(config({ url: "/users", params }), {
