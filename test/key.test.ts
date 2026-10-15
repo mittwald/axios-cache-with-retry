@@ -1,5 +1,6 @@
 import { AxiosHeaders, type InternalAxiosRequestConfig } from "axios";
 import { describe, expect, it, vi } from "vitest";
+import type { RequestKeyContext } from "../src/types.js";
 import {
   defaultRequestKey,
   resolveRequestKey,
@@ -157,6 +158,52 @@ describe("defaultRequestKey", () => {
         }),
       ),
     ).not.toBe(defaultRequestKey(config({ url: "/users/self" })));
+  });
+
+  it("keeps the userinfo of a URL in the key as it is", () => {
+    expect(
+      defaultRequestKey(
+        config({ baseURL: "https://alice:secret@api.test", url: "/users" }),
+      ),
+    ).toContain("alice:secret");
+    expect(
+      defaultRequestKey(config({ url: "https://alice:secret@api.test/users" })),
+    ).toContain("alice:secret");
+  });
+
+  it("keeps an access_token in the params or the url in the key as it is", () => {
+    expect(
+      defaultRequestKey(
+        config({ url: "/users", params: { access_token: "secret", page: 2 } }),
+      ),
+    ).toContain("secret");
+    expect(
+      defaultRequestKey(
+        config({
+          url: "/users",
+          params: new URLSearchParams([["access_token", "secret"]]),
+        }),
+      ),
+    ).toContain("secret");
+    expect(
+      defaultRequestKey(config({ url: "/users?access_token=secret&page=2" })),
+    ).toContain("secret");
+  });
+
+  it("ignores config.proxy.auth", () => {
+    const keyOf = (username: string) =>
+      defaultRequestKey(
+        config({
+          url: "/users",
+          proxy: {
+            host: "proxy.test",
+            port: 3128,
+            auth: { username, password: "secret" },
+          },
+        }),
+      );
+
+    expect(keyOf("alice")).toBe(keyOf("bob"));
   });
 
   it("treats an empty config.auth as none", () => {
@@ -339,6 +386,15 @@ describe("resolveRequestKey", () => {
       config: request,
       authHeaders: [],
     });
+  });
+
+  it("hands a custom key the very authHeaders array it was given", async () => {
+    const authHeaders = ["X-Api-Key"];
+    const key = vi.fn((ignoredContext: RequestKeyContext) => "users");
+
+    await resolveRequestKey(key, config({ url: "/users" }), { authHeaders });
+
+    expect(key.mock.calls[0]?.[0].authHeaders).toBe(authHeaders);
   });
 
   it("passes a custom undefined through, opting the request out", async () => {
