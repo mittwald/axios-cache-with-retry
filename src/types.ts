@@ -13,6 +13,8 @@ export type RetryCacheRequestKey = (
 
 export interface RequestKeyContext {
   config: InternalAxiosRequestConfig;
+  /** The `authHeaders` of the setup, to pass on to `defaultRequestKey` */
+  authHeaders: string[];
 }
 
 export interface DefaultRequestKeyOptions {

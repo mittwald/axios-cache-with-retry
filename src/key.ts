@@ -21,7 +21,7 @@ export async function resolveRequestKey(
   options: DefaultRequestKeyOptions = {},
 ): Promise<string | undefined> {
   if (typeof key === "function") {
-    return key({ config });
+    return key({ config, authHeaders: options.authHeaders ?? [] });
   }
 
   return defaultRequestKey(config, options);
