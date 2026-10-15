@@ -80,6 +80,10 @@ function serializeCredentials(
 }
 
 function hasValue(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(hasValue);
+  }
+
   return (
     value !== undefined && value !== null && value !== false && value !== ""
   );
