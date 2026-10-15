@@ -138,7 +138,7 @@ export function setupAxiosRetryCache(
       return storage.get(key);
     },
     async set(key, response, setOptions = {}) {
-      const cache = normalizeCacheOptions(resolvedGlobals.cache);
+      const cache = resolvedGlobals.cache || runtimeDefaults.cache;
       await storage.set(key, {
         key,
         ...entryLifetime(cache, setOptions.ttl),
