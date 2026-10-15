@@ -210,6 +210,17 @@ describe("defaultRequestKey", () => {
     );
   });
 
+  it("moves the credentials out of the base url as well", () => {
+    expect(
+      defaultRequestKey(
+        config({
+          baseURL: "https://alice:secret@api.test/v1?access_token=secret",
+          url: "/users",
+        }),
+      ),
+    ).toMatch(/^get https:\/\/api\.test\/v1 \/users {3}[0-9a-f]{32}$/);
+  });
+
   it("adds authParams to access_token instead of replacing it", () => {
     const keyOf = (params: Record<string, string>) =>
       defaultRequestKey(config({ url: "/users", params }), {
