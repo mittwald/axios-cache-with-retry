@@ -119,17 +119,16 @@ be re-enabled per request by `true` or an explicit `enabled: true`. A partial
 override like `{ cache: { ttl: 5_000 } }` on top of `cache: false` stays off by
 design; it is not a merge bug.
 
-**Without a window, cache and dedupe are off by default.**
-`setupAxiosRetryCache` checks `typeof window === "undefined"` once per call and
-then uses `SERVER_DEFAULTS` from `src/setup.ts`, where `cache.enabled` and
-`dedupe` are `false`; retry stays on. Every runtime without a `window` counts as
-a server, web workers included, and a window that appears or disappears after
-setup changes nothing. Opting in follows the rule above:
-`cache: { enabled: true }` and `dedupe: true`, globally or per request, or
-`cache: true` per request. A config that only sets `cache: { ttl }` stays off on
-purpose: a 1.x server config like that silently stops caching after the upgrade,
-with no error, instead of going on sharing responses between users. Without a
-window, `retryCache: true` turns on cache and retry but not dedupe.
+**A 1.x server config that only sets `cache: { ttl }` silently stops caching
+after the upgrade**, with no error. Without a window, `setupAxiosRetryCache`
+resolves the options against `SERVER_DEFAULTS` in `src/setup.ts`, where
+`cache.enabled` and `dedupe` are `false`, and by the rule above a partial cache
+option does not turn the cache back on. That is on purpose: the alternative is
+going on sharing responses between users. The check runs once per setup call and
+only looks at `typeof window`, so a web worker counts as a server, a `window`
+polyfilled on a server gets the browser defaults, and a window that appears or
+disappears after setup changes nothing. Without a window, `retryCache: true`
+turns on cache and retry but not dedupe.
 
 Dedupe is checked after the early return for "neither cache nor retry is
 enabled", so `dedupe: true` on its own does nothing — a request with both
