@@ -348,6 +348,30 @@ describe("the default key", () => {
     expect([...storage.keys()].join("\n")).not.toMatch(/alice|bob/);
   });
 
+  it("hands a custom key the very authHeaders and authParams arrays of the setup", async () => {
+    const authHeaders = ["X-Api-Key"];
+    const authParams = ["api_key"];
+    const seen: RequestKeyContext[] = [];
+    const client = setupAxiosRetryCache(
+      axios.create({
+        adapter: vi.fn<AxiosAdapter>(async (config) => response(config, 200)),
+      }),
+      {
+        authHeaders,
+        authParams,
+        requestKey: (context) => {
+          seen.push(context);
+          return "users";
+        },
+      },
+    );
+
+    await client.get("/users");
+
+    expect(seen[0]?.authHeaders).toBe(authHeaders);
+    expect(seen[0]?.authParams).toBe(authParams);
+  });
+
   it("hands a custom key the authHeaders and authParams of the setup", async () => {
     const seen: RequestKeyContext[] = [];
     const client = setupAxiosRetryCache(
