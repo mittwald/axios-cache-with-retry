@@ -1,5 +1,5 @@
 import { AxiosHeaders, type InternalAxiosRequestConfig } from "axios";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   defaultRequestKey,
   resolveRequestKey,
@@ -304,6 +304,15 @@ describe("resolveRequestKey", () => {
         config({ url: "/users" }),
       ),
     ).resolves.toBe("resource:/users");
+  });
+
+  it("hands a custom key the config only", async () => {
+    const request = config({ url: "/users" });
+    const key = vi.fn(() => "users");
+
+    await resolveRequestKey(key, request, { authHeaders: ["X-Api-Key"] });
+
+    expect(key).toHaveBeenCalledWith({ config: request });
   });
 
   it("passes a custom undefined through, opting the request out", async () => {
