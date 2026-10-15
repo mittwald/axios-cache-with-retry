@@ -160,37 +160,123 @@ describe("defaultRequestKey", () => {
     ).not.toBe(defaultRequestKey(config({ url: "/users/self" })));
   });
 
-  it("keeps the userinfo of a URL in the key as it is", () => {
-    expect(
+  it("moves the userinfo of a URL into the digest", () => {
+    const alice = defaultRequestKey(
+      config({ baseURL: "https://alice:secret@api.test", url: "/users" }),
+    );
+
+    expect(alice).toMatch(/^get https:\/\/api\.test \/users {3}[0-9a-f]{32}$/);
+    expect(alice).not.toBe(
       defaultRequestKey(
-        config({ baseURL: "https://alice:secret@api.test", url: "/users" }),
+        config({ baseURL: "https://bob:secret@api.test", url: "/users" }),
       ),
-    ).toContain("alice:secret");
+    );
     expect(
       defaultRequestKey(config({ url: "https://alice:secret@api.test/users" })),
-    ).toContain("alice:secret");
-  });
-
-  it("keeps an access_token in the params or the url in the key as it is", () => {
+    ).toMatch(/^get {2}https:\/\/api\.test\/users {3}[0-9a-f]{32}$/);
     expect(
       defaultRequestKey(
-        config({ url: "/users", params: { access_token: "secret", page: 2 } }),
+        config({ baseURL: "https://alice:p@ss@api.test", url: "/users" }),
       ),
-    ).toContain("secret");
+    ).toMatch(/^get https:\/\/api\.test \/users {3}[0-9a-f]{32}$/);
+  });
+
+  it("moves an access_token in the params or the url into the digest", () => {
+    const fromObject = defaultRequestKey(
+      config({ url: "/users", params: { access_token: "secret", page: 2 } }),
+    );
+    const fromSearchParams = defaultRequestKey(
+      config({
+        url: "/users",
+        params: new URLSearchParams([
+          ["access_token", "secret"],
+          ["page", "2"],
+        ]),
+      }),
+    );
+    const fromUrl = defaultRequestKey(
+      config({ url: "/users?access_token=secret&page=2" }),
+    );
+
+    expect(fromObject).toMatch(/^get {2}\/users \{"page":2\} {2}[0-9a-f]{32}$/);
+    expect(fromSearchParams).toMatch(
+      /^get {2}\/users \[\["page","2"\]\] {2}[0-9a-f]{32}$/,
+    );
+    expect(fromUrl).toMatch(/^get {2}\/users\?page=2 {3}[0-9a-f]{32}$/);
+    expect(fromObject).not.toBe(
+      defaultRequestKey(
+        config({ url: "/users", params: { access_token: "other", page: 2 } }),
+      ),
+    );
+  });
+
+  it("adds authParams to access_token instead of replacing it", () => {
+    const keyOf = (params: Record<string, string>) =>
+      defaultRequestKey(config({ url: "/users", params }), {
+        authParams: ["api_key"],
+      });
+
+    expect(keyOf({ api_key: "secret" })).not.toContain("secret");
+    expect(keyOf({ access_token: "secret" })).not.toContain("secret");
     expect(
       defaultRequestKey(
-        config({
-          url: "/users",
-          params: new URLSearchParams([["access_token", "secret"]]),
-        }),
+        config({ url: "/users", params: { api_key: "secret" } }),
       ),
-    ).toContain("secret");
-    expect(
-      defaultRequestKey(config({ url: "/users?access_token=secret&page=2" })),
     ).toContain("secret");
   });
 
-  it("ignores config.proxy.auth", () => {
+  it("leaves a url, params and an empty access_token without credentials as they are", () => {
+    expect(defaultRequestKey(config({ url: "/users?page=2&sort=name" }))).toBe(
+      "get  /users?page=2&sort=name  ",
+    );
+    expect(
+      defaultRequestKey(config({ url: "/users?access_token=&page=2" })),
+    ).toBe("get  /users?access_token=&page=2  ");
+    expect(
+      defaultRequestKey(
+        config({ url: "/users", params: { access_token: "", page: 2 } }),
+      ),
+    ).toBe('get  /users {"access_token":"","page":2} ');
+    expect(
+      defaultRequestKey(config({ baseURL: "https://api.test", url: "/users" })),
+    ).toBe("get https://api.test /users  ");
+  });
+
+  it.each([
+    "https://api.test:8443/users/@alice/files?page=2&sort=name&flag&tag=a&tag=b#top",
+    "http://[::1]:3000/users",
+    "//api.test/users?page=2",
+    "/users?q=a+b&name=%20x",
+    "/users?access_token_extra=1&my_access_token=2",
+    "/users?access_token=&page=2",
+    "/users?access_token",
+    "/users#access_token=secret",
+    "mailto:alice@api.test",
+  ])("leaves %s as it is without credentials", (url) => {
+    expect(defaultRequestKey(config({ url }))).toBe(`get  ${url}  `);
+  });
+
+  it.each([
+    [
+      "https://alice:secret@api.test:8443/users?page=2#top",
+      "https://api.test:8443/users?page=2#top",
+    ],
+    ["//alice:secret@api.test/users", "//api.test/users"],
+    ["http://alice@[::1]:3000/users", "http://[::1]:3000/users"],
+    ["/users?access_token=secret", "/users"],
+    ["/users?page=2&access_token=secret#top", "/users?page=2#top"],
+    ["/users?access_token=a&page=2&access_token=b", "/users?page=2"],
+    ["/users?access%5Ftoken=secret&page=2", "/users?page=2"],
+    ["/users/@alice?access_token=a+b", "/users/@alice"],
+  ])("moves the credentials out of %s", (url, rest) => {
+    expect(defaultRequestKey(config({ url }))).toMatch(
+      new RegExp(
+        `^get {2}${rest.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")} {3}[0-9a-f]{32}$`,
+      ),
+    );
+  });
+
+  it("separates requests by config.proxy.auth", () => {
     const keyOf = (username: string) =>
       defaultRequestKey(
         config({
@@ -203,7 +289,8 @@ describe("defaultRequestKey", () => {
         }),
       );
 
-    expect(keyOf("alice")).toBe(keyOf("bob"));
+    expect(keyOf("alice")).not.toBe(keyOf("bob"));
+    expect(keyOf("alice")).toMatch(/^get {2}\/users {3}[0-9a-f]{32}$/);
   });
 
   it("treats an empty config.auth as none", () => {
@@ -371,7 +458,7 @@ describe("resolveRequestKey", () => {
     ).resolves.toBe("resource:/users");
   });
 
-  it("hands a custom key the config and the authHeaders", async () => {
+  it("hands a custom key the config, the authHeaders and the authParams", async () => {
     const request = config({ url: "/users" });
     const key = vi.fn(() => "users");
 
@@ -381,10 +468,12 @@ describe("resolveRequestKey", () => {
     expect(key).toHaveBeenNthCalledWith(1, {
       config: request,
       authHeaders: ["X-Api-Key"],
+      authParams: [],
     });
     expect(key).toHaveBeenNthCalledWith(2, {
       config: request,
       authHeaders: [],
+      authParams: [],
     });
   });
 
