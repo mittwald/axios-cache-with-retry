@@ -23,6 +23,9 @@ three don't trip over each other. Built by [mittwald](https://www.mittwald.de).
 - 🤝 **Merging** of identical requests that run at the same time.
 - 🧹 **Invalidation** by key, prefix or URL that also reaches requests still on
   their way.
+- 🔒 **Safe on servers by default**: without a `window`, cache and merging stay
+  off until you opt in, and the default key keeps requests with different
+  credentials apart.
 - 🧩 **One adapter** instead of three interceptors, so a retry never runs
   through the cache again and `validateStatus` doesn't change what gets retried.
 
@@ -41,10 +44,10 @@ import { setupAxiosRetryCache } from "@mittwald/axios-cache-with-retry";
 const client = setupAxiosRetryCache(axios.create({ baseURL: "/api" }));
 
 await client.get("/users"); // goes to the network
-await client.get("/users"); // answered from the cache for the next 60 s
+await client.get("/users"); // in a browser: from the cache for the next 60 s
 ```
 
-That is all it takes for sensible defaults:
+That is all it takes for sensible defaults. In a browser:
 
 - `GET` and `HEAD` responses with a 2xx status are cached for 60 seconds, in
   memory, for at most 1024 different requests.
@@ -54,14 +57,23 @@ That is all it takes for sensible defaults:
   425, 429, 500, 502, 503 and 504, with growing pauses (or as long as
   `Retry-After` says, up to 30 s).
 
+Without a `window` (Node, Bun, Deno 2, web workers), only the retries are on;
+cache and merging wait for an opt-in, see
+[A server that serves many users](#a-server-that-serves-many-users). The recipes
+below assume a browser unless they say otherwise.
+
 `setupAxiosRetryCache` returns the same instance with an added `retryCache`
 property for managing the cache.
 
 ## What happens to a request
 
 1. **A key is built** from method, base URL, URL, `params` and, for methods
-   other than `GET` and `HEAD`, the body. Requests with the same key count as
-   the same request. Headers are not part of the key.
+   other than `GET` and `HEAD`, the body. If the request carries credentials
+   (`Authorization`, `Cookie`, `Proxy-Authorization`, `config.auth` or a header
+   named in `authHeaders`), a digest of them is added, so different users get
+   different keys. Other headers are not part of the key. Requests with the same
+   key count as the same request. The key is only built when the cache or
+   merging applies to the request.
 2. **Fresh entry in the cache?** Then that is the answer, no request is sent.
 3. **The same request already running?** Then this caller waits for it and gets
    its own copy of the result. This only happens for reads (`GET`, `HEAD`,
@@ -102,22 +114,36 @@ and the old answer is not stored.
 
 ### A server that serves many users
 
-The default key ignores headers, so on a shared instance user B could get user
-A's cached answer. Keep only the retries:
+Without a `window`, cache and merging are off by default, so an instance that
+serves many users only retries:
 
 ```ts
-const client = setupAxiosRetryCache(axios.create(), {
-  cache: false,
-  dedupe: false,
-});
+const client = setupAxiosRetryCache(axios.create());
 
 // at the same time, for two users:
 client.get("/me", { headers: { Authorization: aliceToken } }); // request
 client.get("/me", { headers: { Authorization: bobToken } }); // its own request
 ```
 
-If you do want a cache there, put the user into the key (see
-[Logout and per-user data](#logout-and-per-user-data)).
+To cache there, opt in with `enabled: true` and `dedupe: true`. The default key
+carries a digest of the credentials, so every user gets their own entries; name
+credential headers of your own in `authHeaders`:
+
+```ts
+const client = setupAxiosRetryCache(axios.create(), {
+  cache: { enabled: true },
+  dedupe: true,
+  authHeaders: ["X-Api-Key"],
+});
+
+await client.get("/me", { headers: { "X-Api-Key": alice } }); // request
+await client.get("/me", { headers: { "X-Api-Key": bob } }); // its own request
+await client.get("/me", { headers: { "X-Api-Key": alice } }); // Alice's entry
+```
+
+A cache option without `enabled: true`, such as `cache: { ttl: 5_000 }`, does
+not turn the cache on there. Which runtimes count as a server is listed under
+[Browser and server defaults](#browser-and-server-defaults).
 
 ### Objects that appear a moment after they were created
 
@@ -192,7 +218,9 @@ await Promise.all([search("orders"), search("orders")]); // one request
 ```
 
 If you write your own `requestKey`, include the body for such requests, or two
-different searches get the same answer.
+different searches get the same answer. Without a `window`, add `enabled: true`
+to the per-request `cache` and `dedupe: true` next to it, or the two `orders`
+searches are sent twice.
 
 ### Logout and per-user data
 
@@ -205,21 +233,29 @@ await client.retryCache.clear(); // on logout
 await client.get("/me"); // Bob: request, never Alice's answer
 ```
 
-To keep several users apart in one cache, build on the default key:
+The default key already keeps users apart whose credentials travel with the
+request. Cookies the browser manages (`withCredentials`) never show up in the
+request config, so with a cookie session `clear()` on logout is what keeps the
+users apart.
+
+To add something else to the key, such as a tenant, build on the default key and
+pass on the `authHeaders` from the context, or the headers they name drop out of
+the key:
 
 ```ts
 import { defaultRequestKey } from "@mittwald/axios-cache-with-retry";
 
 const client = setupAxiosRetryCache(axios.create(), {
-  requestKey: ({ config }) => {
-    const key = defaultRequestKey(config);
-    return key && `${currentUserId()} ${key}`;
+  authHeaders: ["X-Api-Key"],
+  requestKey: ({ config, authHeaders }) => {
+    const key = defaultRequestKey(config, { authHeaders });
+    return key && `${currentTenant()} ${key}`;
   },
 });
 
-await client.get("/me"); // Alice: request, cached under Alice's key
-await client.get("/me"); // Bob: request, cached under Bob's key
-await client.get("/me"); // Alice again: from her entry, no request
+await client.get("/settings"); // tenant A: request, cached under A's key
+await client.get("/settings"); // tenant B: request, cached under B's key
+await client.get("/settings"); // tenant A again: from its entry, no request
 ```
 
 Returning `undefined` from `requestKey` excludes a request from cache and
@@ -275,19 +311,33 @@ const client = setupAxiosRetryCache(axios.create(), {
 
 ## Reference
 
+### Browser and server defaults
+
+`setupAxiosRetryCache` checks `typeof window` once, when it is called. With a
+`window`, cache and merging are on by default; without one, they are off until
+you opt in. Retry is on in both.
+
+| Runtime                                                                       | Defaults                                                                          |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Browsers, React Native, Electron renderers, jsdom and happy-dom test setups   | Browser: cache and merging on                                                     |
+| Node, Bun, Deno 2, web workers, the Electron main process                     | Server: cache and merging off                                                     |
+| Deno 1.x, and Node with a `window` put on `globalThis` (global-jsdom, domino) | Browser, although it is a server: set `cache: false` and `dedupe: false` yourself |
+
 ### `cache`
 
-| Option         | Default          | Description                                                  |
-| -------------- | ---------------- | ------------------------------------------------------------ |
-| `enabled`      | `true`           | Set to `false` to keep the cache off until a request opts in |
-| `ttl`          | `60000`          | How long an entry is answered from the cache, in ms          |
-| `methods`      | `["get","head"]` | Methods whose responses are cached                           |
-| `staleIfError` | `false`          | Return an expired entry when every attempt failed            |
-| `maxStaleAge`  | unlimited        | How long after expiry `staleIfError` may use an entry, in ms |
-| `shouldCache`  | 2xx status       | Decides whether a response is stored                         |
+| Option         | Default                                         | Description                                                                                                 |
+| -------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `enabled`      | `true` in a browser, `false` without a `window` | Set to `false` to keep the cache off until a request opts in; without a `window`, set it to `true` to cache |
+| `ttl`          | `60000`                                         | How long an entry is answered from the cache, in ms                                                         |
+| `methods`      | `["get","head"]`                                | Methods whose responses are cached                                                                          |
+| `staleIfError` | `false`                                         | Return an expired entry when every attempt failed                                                           |
+| `maxStaleAge`  | unlimited                                       | How long after expiry `staleIfError` may use an entry, in ms                                                |
+| `shouldCache`  | 2xx status                                      | Decides whether a response is stored                                                                        |
 
-An entry written without `staleIfError` is gone at expiry, also for a later
-request that has `staleIfError` on.
+A cache option without `enabled` keeps the default, so without a `window`,
+`cache: { ttl }` alone does not turn the cache on. An entry written without
+`staleIfError` is gone at expiry, also for a later request that has
+`staleIfError` on.
 
 ### `retry`
 
@@ -307,18 +357,20 @@ A `Retry-After` above `maxDelay` ends the retries, even when `shouldRetry`
 returns `true`: the caller gets that response at once. A configured `delay`
 above `maxDelay` is cut to it.
 
-### `requestKey`, `dedupe`, `storage`, `onStorageError`
+### `requestKey`, `authHeaders`, `dedupe`, `storage`, `onStorageError`
 
-| Option           | Default                 | Description                                                    |
-| ---------------- | ----------------------- | -------------------------------------------------------------- |
-| `requestKey`     | `defaultRequestKey`     | Function of `{ config }`; `undefined` excludes a request       |
-| `dedupe`         | `true`                  | Merge identical reads that run at the same time                |
-| `storage`        | `createMemoryStorage()` | Where entries live                                             |
-| `onStorageError` | none                    | Called with `{ operation, key, error }` when the storage fails |
+| Option           | Default                                         | Description                                                                                                                                                               |
+| ---------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requestKey`     | `defaultRequestKey`                             | Function of `{ config, authHeaders }`; `undefined` excludes a request. Only called when the cache or merging applies                                                      |
+| `authHeaders`    | none                                            | Further headers that carry credentials, for every request of the instance, in addition to `Authorization`, `Cookie` and `Proxy-Authorization`; matched case-insensitively |
+| `dedupe`         | `true` in a browser, `false` without a `window` | Merge identical reads that run at the same time                                                                                                                           |
+| `storage`        | `createMemoryStorage()`                         | Where entries live                                                                                                                                                        |
+| `onStorageError` | none                                            | Called with `{ operation, key, error }` when the storage fails                                                                                                            |
 
-`defaultRequestKey(config)` and `stableSerialize(value)` are exported for custom
-keys. `stableSerialize` sorts object keys and `URLSearchParams`, so the order of
-`params` doesn't matter.
+`defaultRequestKey(config, { authHeaders })` and `stableSerialize(value)` are
+exported for custom keys. A custom key built on `defaultRequestKey` has to pass
+on the `authHeaders` it gets in its context. `stableSerialize` sorts object keys
+and `URLSearchParams`, so the order of `params` doesn't matter.
 
 `createMemoryStorage({ maxEntries, sweepInterval })` keeps at most `maxEntries`
 entries (default `1024`, `Infinity` for no limit) and drops the least recently
@@ -330,12 +382,12 @@ observes; errors it throws are swallowed.
 
 ### Per-request `retryCache`
 
-| Value               | Effect                                           |
-| ------------------- | ------------------------------------------------ |
-| `false`             | Bypasses the adapter entirely                    |
-| `true`              | Enables cache and retry with the global settings |
-| `{ cache, retry }`  | Merges into the global settings for this request |
-| `{ dedupe: false }` | Opts this request out of merging                 |
+| Value              | Effect                                                                      |
+| ------------------ | --------------------------------------------------------------------------- |
+| `false`            | Bypasses the adapter entirely                                               |
+| `true`             | Enables cache and retry with the global settings; merging keeps its default |
+| `{ cache, retry }` | Merges into the global settings for this request                            |
+| `{ dedupe }`       | Turns merging on or off for this request                                    |
 
 The field is typed on Axios' own `AxiosRequestConfig`.
 
@@ -357,8 +409,20 @@ Entries written by 1.0.x pass only `key` to `invalidateWhere`.
 
 ## Good to know
 
-- **Headers are not part of the default key.** See
-  [A server that serves many users](#a-server-that-serves-many-users).
+- **Only credentials reach the default key**, as a digest. A header that changes
+  the answer in some other way (a language, a tenant) needs a custom
+  `requestKey`.
+- **Cookies the browser manages are invisible to the key** (`withCredentials`):
+  with a cookie session, call `clear()` when the user changes.
+- **A `Cookie` header that changes with every request** gives every request its
+  own key, so nothing is ever served from the cache.
+- **The digest is fast and unsalted**, so keys match across processes and a
+  shared storage works. Whoever can read the keys of a persistent or shared
+  storage can try passwords against them offline: weak Basic-auth passwords can
+  be recovered, long random tokens cannot.
+- **Keys are not unambiguous**: a text body sent without credentials that ends
+  in a space and someone's digest gets that person's key. Crafting one needs the
+  digest, which only the storage holds.
 - **Writes are never merged**, whatever their key: two `POST`s are two intended
   operations, unless you opted them in via `cache.methods`.
 - **Only 2xx responses are cached** unless `shouldCache` says otherwise, also
