@@ -71,6 +71,19 @@ describe("without a window", () => {
     expect(adapter).toHaveBeenCalledTimes(2);
   });
 
+  it("does not cache when an optional enabled resolves to undefined", async () => {
+    const adapter = okAdapter();
+    const enabled: boolean | undefined = undefined;
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { enabled, ttl: 10_000 },
+    });
+
+    await client.get("/users");
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
   it("does not cache a request that only sets a ttl", async () => {
     const adapter = okAdapter();
     const client = setupAxiosRetryCache(axios.create({ adapter }));
