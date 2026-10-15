@@ -306,13 +306,21 @@ describe("resolveRequestKey", () => {
     ).resolves.toBe("resource:/users");
   });
 
-  it("hands a custom key the config only", async () => {
+  it("hands a custom key the config and the authHeaders", async () => {
     const request = config({ url: "/users" });
     const key = vi.fn(() => "users");
 
     await resolveRequestKey(key, request, { authHeaders: ["X-Api-Key"] });
+    await resolveRequestKey(key, request);
 
-    expect(key).toHaveBeenCalledWith({ config: request });
+    expect(key).toHaveBeenNthCalledWith(1, {
+      config: request,
+      authHeaders: ["X-Api-Key"],
+    });
+    expect(key).toHaveBeenNthCalledWith(2, {
+      config: request,
+      authHeaders: [],
+    });
   });
 
   it("passes a custom undefined through, opting the request out", async () => {

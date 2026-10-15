@@ -306,6 +306,26 @@ describe("the default key", () => {
     expect(adapter).toHaveBeenCalledTimes(2);
   });
 
+  it("lets a custom key pass the authHeaders of its context on to the default key", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200, config.headers["X-Api-Key"]),
+    );
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 60_000 },
+      authHeaders: ["X-Api-Key"],
+      requestKey: ({ config, authHeaders }) =>
+        `custom ${defaultRequestKey(config, { authHeaders })}`,
+    });
+
+    await client.get("/users/self", { headers: { "X-Api-Key": "alice" } });
+    const bob = await client.get("/users/self", {
+      headers: { "X-Api-Key": "bob" },
+    });
+
+    expect(bob.data).toBe("bob");
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
   it("does not merge concurrent requests with different Authorization", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) => {
       await new Promise((resolve) => setTimeout(resolve, 5));
