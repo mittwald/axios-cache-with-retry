@@ -70,6 +70,10 @@ export function setupAxiosRetryCache(
         : normalizeCacheOptions(options.cache, runtimeDefaults.cache),
     dedupe: options.dedupe ?? runtimeDefaults.dedupe,
   };
+  const keyOptions = {
+    authHeaders: options.authHeaders,
+    authParams: options.authParams,
+  };
   const storage = options.storage ?? createMemoryStorage();
   const originalAdapter =
     installedAdapters.get(instance) ??
@@ -102,9 +106,7 @@ export function setupAxiosRetryCache(
 
     const requestKey =
       cache || dedupeEnabled
-        ? await resolveRequestKey(options.requestKey, config, {
-            authHeaders: options.authHeaders,
-          })
+        ? await resolveRequestKey(options.requestKey, config, keyOptions)
         : undefined;
 
     let adapter = withRetry(originalAdapter, effective.retry);

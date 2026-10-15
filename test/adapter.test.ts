@@ -326,6 +326,50 @@ describe("the default key", () => {
     expect(adapter).toHaveBeenCalledTimes(2);
   });
 
+  it("gives requests with different credentials in the url their own cache entries", async () => {
+    const adapter = vi.fn<AxiosAdapter>(async (config) =>
+      response(config, 200, config.url),
+    );
+    const storage = createMemoryStorage();
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      cache: { ttl: 60_000 },
+      authParams: ["api_key"],
+      storage,
+    });
+
+    await client.get("/users/self?access_token=alice");
+    const bob = await client.get("/users/self?access_token=bob");
+    await client.get("/users/self", { params: { api_key: "alice" } });
+    await client.get("/users/self", { params: { api_key: "bob" } });
+    await client.get("/users/self?access_token=alice");
+
+    expect(bob.data).toBe("/users/self?access_token=bob");
+    expect(adapter).toHaveBeenCalledTimes(4);
+    expect([...storage.keys()].join("\n")).not.toMatch(/alice|bob/);
+  });
+
+  it("hands a custom key the authHeaders and authParams of the setup", async () => {
+    const seen: RequestKeyContext[] = [];
+    const client = setupAxiosRetryCache(
+      axios.create({
+        adapter: vi.fn<AxiosAdapter>(async (config) => response(config, 200)),
+      }),
+      {
+        authHeaders: ["X-Api-Key"],
+        authParams: ["api_key"],
+        requestKey: (context) => {
+          seen.push(context);
+          return "users";
+        },
+      },
+    );
+
+    await client.get("/users");
+
+    expect(seen[0]?.authHeaders).toEqual(["X-Api-Key"]);
+    expect(seen[0]?.authParams).toEqual(["api_key"]);
+  });
+
   it("does not merge concurrent requests with different Authorization", async () => {
     const adapter = vi.fn<AxiosAdapter>(async (config) => {
       await new Promise((resolve) => setTimeout(resolve, 5));

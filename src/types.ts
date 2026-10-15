@@ -14,7 +14,9 @@ export type RetryCacheRequestKey = (
 export interface RequestKeyContext {
   config: InternalAxiosRequestConfig;
   /** The `authHeaders` of the setup, to pass on to `defaultRequestKey` */
-  authHeaders: string[];
+  authHeaders: readonly string[];
+  /** The `authParams` of the setup, to pass on to `defaultRequestKey` */
+  authParams: readonly string[];
 }
 
 export interface DefaultRequestKeyOptions {
@@ -22,7 +24,13 @@ export interface DefaultRequestKeyOptions {
    * Further headers that carry credentials, in addition to `Authorization`,
    * `Cookie` and `Proxy-Authorization`. Names are matched case-insensitively.
    */
-  authHeaders?: string[];
+  authHeaders?: readonly string[];
+  /**
+   * Further query parameters that carry credentials, in addition to
+   * `access_token`, in `params` or in the query of the url. Names are matched
+   * exactly.
+   */
+  authParams?: readonly string[];
 }
 
 export interface CacheOptions {
@@ -90,6 +98,11 @@ export interface RetryCacheOptions {
    * instance. See {@link DefaultRequestKeyOptions.authHeaders}.
    */
   authHeaders?: DefaultRequestKeyOptions["authHeaders"];
+  /**
+   * Further credential query parameters for the default key, for every request
+   * of this instance. See {@link DefaultRequestKeyOptions.authParams}.
+   */
+  authParams?: DefaultRequestKeyOptions["authParams"];
   cache?: false | Partial<CacheOptions>;
   retry?: false | Partial<RetryOptions>;
   dedupe?: boolean;
