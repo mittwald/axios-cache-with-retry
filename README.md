@@ -67,13 +67,16 @@ property for managing the cache.
 
 ## What happens to a request
 
-1. **A key is built** from method, base URL, URL, `params` and, for methods
-   other than `GET` and `HEAD`, the body. If the request carries credentials
-   (`Authorization`, `Cookie`, `Proxy-Authorization` and `config.auth`, plus any
-   header named in `authHeaders`), a digest of them is added, so different users
-   get different keys. Other headers are not part of the key. Requests with the
-   same key count as the same request. The key is only built when the cache or
-   merging applies to the request.
+1. **A key is built**, by default from method, base URL, URL, `params` and, for
+   methods other than `GET` and `HEAD`, the body. Credentials are taken out of
+   it and added as a digest, so different users get different keys: the headers
+   `Authorization`, `Cookie` and `Proxy-Authorization`, `config.auth`,
+   `config.proxy.auth`, the userinfo of the URL (`user:pass@`) and an
+   `access_token` query parameter, plus any header named in `authHeaders` and
+   any parameter named in `authParams`. Other headers are not part of the key.
+   Requests with the same key count as the same request. The key is only built
+   when the cache or merging applies to the request; a custom `requestKey`
+   replaces all of this.
 2. **Fresh entry in the cache?** Then that is the answer, no request is sent.
 3. **The same request already running?** Then this caller waits for it and gets
    its own copy of the result. This only happens for reads (`GET`, `HEAD`,
@@ -239,16 +242,16 @@ request config, so with a cookie session `clear()` on logout is what keeps the
 users apart.
 
 To add something else to the key, such as a tenant, build on the default key and
-pass on the `authHeaders` from the context, or the headers they name drop out of
-the key:
+pass on the `authHeaders` and `authParams` from the context, or the headers and
+parameters they name stay in the key as they are:
 
 ```ts
 import { defaultRequestKey } from "@mittwald/axios-cache-with-retry";
 
 const client = setupAxiosRetryCache(axios.create(), {
   authHeaders: ["X-Api-Key"],
-  requestKey: ({ config, authHeaders }) => {
-    const key = defaultRequestKey(config, { authHeaders });
+  requestKey: ({ config, authHeaders, authParams }) => {
+    const key = defaultRequestKey(config, { authHeaders, authParams });
     return key && `${currentTenant()} ${key}`;
   },
 });
@@ -313,15 +316,19 @@ const client = setupAxiosRetryCache(axios.create(), {
 
 ### Browser and server defaults
 
-`setupAxiosRetryCache` checks `typeof window` once, when it is called. With a
-`window`, cache and merging are on by default; without one, they are off until
-you opt in. Retry is on in both.
+`setupAxiosRetryCache` checks `typeof window` once, when it is called, unless
+the `runtime` option says `"browser"` or `"server"`. With a `window`, cache and
+merging are on by default; without one, they are off until you opt in. Retry is
+on in both.
 
-| Runtime                                                                       | Defaults                                                                          |
-| ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Browsers, React Native, Electron renderers, jsdom and happy-dom test setups   | Browser: cache and merging on                                                     |
-| Node, Bun, Deno 2, web workers, the Electron main process                     | Server: cache and merging off                                                     |
-| Deno 1.x, and Node with a `window` put on `globalThis` (global-jsdom, domino) | Browser, although it is a server: set `cache: false` and `dedupe: false` yourself |
+| Runtime                                                                       | Defaults                                                  |
+| ----------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Browsers, React Native, Electron renderers, jsdom and happy-dom test setups   | Browser: cache and merging on                             |
+| Node, Bun, Deno 2, web workers, the Electron main process                     | Server: cache and merging off                             |
+| Deno 1.x, and Node with a `window` put on `globalThis` (global-jsdom, domino) | Browser, although it is a server: set `runtime: "server"` |
+
+A web worker that serves a single user can take the browser defaults with
+`runtime: "browser"`.
 
 ### `cache`
 
@@ -357,20 +364,23 @@ A `Retry-After` above `maxDelay` ends the retries, even when `shouldRetry`
 returns `true`: the caller gets that response at once. A configured `delay`
 above `maxDelay` is cut to it.
 
-### `requestKey`, `authHeaders`, `dedupe`, `storage`, `onStorageError`
+### `runtime`, `requestKey`, `authHeaders`, `authParams`, `dedupe`, `storage`, `onStorageError`
 
-| Option           | Default                                         | Description                                                                                                                                                                                                                |
-| ---------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `requestKey`     | `defaultRequestKey`                             | Function of `{ config, authHeaders }`; `undefined` excludes a request. Only called when the cache or merging applies                                                                                                       |
-| `authHeaders`    | `[]`                                            | Headers that carry credentials besides `Authorization`, `Cookie` and `Proxy-Authorization`, which are always part of the key, like `config.auth`. Applies to every request of the instance; names match case-insensitively |
-| `dedupe`         | `true` in a browser, `false` without a `window` | Merge identical reads that run at the same time                                                                                                                                                                            |
-| `storage`        | `createMemoryStorage()`                         | Where entries live                                                                                                                                                                                                         |
-| `onStorageError` | none                                            | Called with `{ operation, key, error }` when the storage fails                                                                                                                                                             |
+| Option           | Default                                         | Description                                                                                                                                                                                                                                                   |
+| ---------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime`        | detected via `typeof window`                    | `"browser"` or `"server"`; picks the defaults of [Browser and server defaults](#browser-and-server-defaults)                                                                                                                                                  |
+| `requestKey`     | `defaultRequestKey`                             | Function of `{ config, authHeaders, authParams }`; `undefined` excludes a request. Only called when the cache or merging applies                                                                                                                              |
+| `authHeaders`    | `[]`                                            | Headers that carry credentials besides `Authorization`, `Cookie` and `Proxy-Authorization`, which always count, like `config.auth`, `config.proxy.auth` and the userinfo of the URL. Applies to every request of the instance; names match case-insensitively |
+| `authParams`     | `[]`                                            | Query parameters that carry credentials besides `access_token`, which always counts, in `params` or in the query of the URL. Applies to every request of the instance; names match exactly                                                                    |
+| `dedupe`         | `true` in a browser, `false` without a `window` | Merge identical reads that run at the same time                                                                                                                                                                                                               |
+| `storage`        | `createMemoryStorage()`                         | Where entries live                                                                                                                                                                                                                                            |
+| `onStorageError` | none                                            | Called with `{ operation, key, error }` when the storage fails                                                                                                                                                                                                |
 
-`defaultRequestKey(config, { authHeaders })` and `stableSerialize(value)` are
-exported for custom keys. A custom key built on `defaultRequestKey` has to pass
-on the `authHeaders` it gets in its context. `stableSerialize` sorts object keys
-and `URLSearchParams`, so the order of `params` doesn't matter.
+`defaultRequestKey(config, { authHeaders, authParams })` and
+`stableSerialize(value)` are exported for custom keys. A custom key built on
+`defaultRequestKey` has to pass on the `authHeaders` and `authParams` it gets in
+its context, frozen copies of the setup options. `stableSerialize` sorts object
+keys and `URLSearchParams`, so the order of `params` doesn't matter.
 
 `createMemoryStorage({ maxEntries, sweepInterval })` keeps at most `maxEntries`
 entries (default `1024`, `Infinity` for no limit) and drops the least recently
@@ -409,9 +419,9 @@ Entries written by 1.0.x pass only `key` to `invalidateWhere`.
 
 ## Good to know
 
-- **Only credentials reach the default key**, as a digest. A header that changes
-  the answer in some other way (a language, a tenant) needs a custom
-  `requestKey`.
+- **Credentials reach the default key only as a digest**, also when they sit in
+  the URL. A header that changes the answer in some other way (a language, a
+  tenant) needs a custom `requestKey`.
 - **Cookies the browser manages are invisible to the key** (`withCredentials`):
   with a cookie session, call `clear()` when the user changes.
 - **A `Cookie` header that changes with every request** gives every request its

@@ -124,11 +124,11 @@ after the upgrade**, with no error. Without a window, `setupAxiosRetryCache`
 resolves the options against `SERVER_DEFAULTS` in `src/setup.ts`, where
 `cache.enabled` and `dedupe` are `false`, and by the rule above a partial cache
 option does not turn the cache back on. That is on purpose: the alternative is
-going on sharing responses between users. The check runs once per setup call and
-only looks at `typeof window`, so a web worker counts as a server, a `window`
-polyfilled on a server gets the browser defaults, and a window that appears or
-disappears after setup changes nothing. Without a window, `retryCache: true`
-turns on cache and retry but not dedupe.
+going on sharing responses between users. The check runs once per setup call
+and, without the `runtime` option, only looks at `typeof window`: a web worker
+counts as a server, a `window` polyfilled on a server gets the browser defaults,
+and a window that appears or disappears after setup changes nothing. Without a
+window, `retryCache: true` turns on cache and retry but not dedupe.
 
 Dedupe is checked after the early return for "neither cache nor retry is
 enabled", so `dedupe: true` on its own does nothing — a request with both
@@ -150,15 +150,23 @@ may carry a body. A custom key that leaves the body out merges and caches such
 requests across bodies; the tests in "deduplication of writes" pin both sides.
 
 **The default key carries a digest of the credentials** as its last segment: the
-headers in `CREDENTIAL_HEADERS` and `authHeaders` plus `config.auth`, and only
-when one of them has a value. Keys without credentials stay as in 1.x, so
+headers in `CREDENTIAL_HEADERS` and `authHeaders`, the parameters in
+`CREDENTIAL_PARAMS` and `authParams` (in `params` and in the query of `url` and
+`baseURL`), the userinfo of `url` and `baseURL`, `config.auth` and
+`config.proxy.auth`, and only when one of them has a value. Credentials in the
+URL or the params are taken out of their segment, so no secret stays in the key
+in plain text. Keys without credentials stay as in 1.x ("leaves %s as it is
+without credentials" in `test/key.test.ts` also passes against 1.x), so
 `invalidatePrefix` on the start of a key still reaches the entries of every
 user. `config.auth` is read on its own because axios hands it to the adapter as
 it is; only axios' own adapters turn it into a header, after the key is built.
 Cookies the browser manages (`withCredentials`) never show up in the config, so
 a user switch with a cookie session still needs `clear()`. A custom `requestKey`
-built on `defaultRequestKey` has to pass on the `authHeaders` from its context,
-or the names they add stay out of its keys. "the default key" in
+built on `defaultRequestKey` has to pass on the `authHeaders` and `authParams`
+from its context, or the names they add are not treated as credentials. The
+context holds frozen copies made once per setup; `withDefaults` in `src/key.ts`
+remembers the merged names only for frozen lists, since a list that can still
+change would make the remembered names wrong. "the default key" in
 `test/adapter.test.ts` pins the behaviour.
 
 **The key is not unambiguous.** Its segments are joined with spaces and a string
