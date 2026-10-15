@@ -137,8 +137,8 @@ requests across bodies; the tests in "deduplication of writes" pin both sides.
 
 Headers are not part of the default key, `Authorization` included, so an
 instance shared by several users (typically on a server) needs cache and dedupe
-off or a user-aware `requestKey`. The README says so under `requestKey`; "the
-default key" in `test/adapter.test.ts` pins it.
+off or a user-aware `requestKey`. The README says so under "A server that serves
+many users"; "the default key" in `test/adapter.test.ts` pins it.
 
 ---
 
