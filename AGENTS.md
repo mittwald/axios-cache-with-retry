@@ -248,14 +248,16 @@ revalidate), `private` when `cache.shared` is on, and `Vary: *`; a custom
 what the headers exclude. `must-revalidate`, and `proxy-revalidate` or
 `s-maxage` in a shared cache (RFC 9111, section 5.2.2.10), do not stop storing
 but give the entry `staleUntil = expiresAt`, so the existing dead-entry logic
-keeps `staleIfError` away from it. `cache.shared` defaults to the runtime
-(`SERVER_DEFAULTS` has it on). That is why `cache: false` resolves to the
-runtime defaults with `enabled: false` instead of `false`: a request that turns
-the cache back on must still get the right `shared`. `retryCache.set()` skips
-the gate on purpose, and merged callers share an answer whatever its headers
-say. A qualified directive such as `no-cache="Set-Cookie"` or
-`private="Set-Cookie"` counts like the unqualified one: storing the response
-without the listed fields is not worth the code.
+keeps `staleIfError` away from it. `respectCacheControl: false` lifts all of
+these except `private` in a shared cache, which keeps one user's answer from
+another rather than guarding freshness; `Vary` has its own switch.
+`cache.shared` defaults to the runtime (`SERVER_DEFAULTS` has it on). That is
+why `cache: false` resolves to the runtime defaults with `enabled: false`
+instead of `false`: a request that turns the cache back on must still get the
+right `shared`. `retryCache.set()` skips the gate on purpose, and merged callers
+share an answer whatever its headers say. A qualified directive such as
+`no-cache="Set-Cookie"` or `private="Set-Cookie"` counts like the unqualified
+one: storing the response without the listed fields is not worth the code.
 
 **The request's own Cache-Control is an opt-in** (`respectRequestCacheControl`,
 read by `requestedFreshness` in `src/cache.ts`), off by default: clients often
@@ -264,8 +266,12 @@ HTTP cache out, and would otherwise never get a hit. Once on, `no-cache` and
 `max-age=0` skip the stored entry, also as a stale fallback, and still store the
 fresh answer; `no-store` skips reading and storing. RFC 9111 only forbids
 storing for a `no-store` request; skipping the read too is a deliberate,
-stricter choice. Merging is not affected. The switch is separate from
-`respectCacheControl`, so turning either off keeps the other side's rules.
+stricter choice. Such a request also stays out of merging: dedupe is the outer
+layer and would otherwise hand it another caller's answer, a cache hit included.
+`setupAxiosRetryCache` therefore evaluates `requestedFreshness` once, turns
+dedupe off when `skipRead` is set and hands the result to `withCache`. The
+switch is separate from `respectCacheControl`, so turning either off keeps the
+other side's rules.
 
 **An entry stores digests of the request headers named in `Vary`** (`vary` on
 the entry, `null` for an absent header), never the raw values, since
@@ -343,6 +349,12 @@ stubs it back to `undefined` in a `beforeEach`, as `test/server.test.ts` does,
 and `unstubGlobals` in `vitest.config.ts` undoes both before the next test. The
 stub has to be in place when `setupAxiosRetryCache` runs, because that is when
 the defaults are picked.
+
+`test/headers.test.ts` covers Cache-Control and Vary. Its adapter for the `Vary`
+values writes into `config.headers`, as axios' http adapter does, since
+`withCache` has to read them from a copy taken before the call; a plain `vi.fn`
+adapter would not notice a read after it. `heldBackend` there holds every
+request until `answerAll`, for tests that need two requests in flight.
 
 `test/digest.test.ts` counts how often the hash runs by mocking `src/hash.js`
 with `vi.mock`. The memo in `src/key.ts` lives as long as the module, so each
