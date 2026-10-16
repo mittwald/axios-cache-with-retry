@@ -1,4 +1,9 @@
-import type { InvalidationTarget, RetryCacheStorage } from "./types.js";
+import type {
+  Awaitable,
+  CacheEntry,
+  InvalidationTarget,
+  RetryCacheStorage,
+} from "./types.js";
 
 export interface Flight {
   readonly detached: boolean;
@@ -11,12 +16,61 @@ interface TrackedFlight {
   onDetach?: () => void;
 }
 
+interface Invalidation {
+  matches: (target: InvalidationTarget) => boolean;
+  /** Keys stored anew since the invalidation began */
+  stored: Set<string>;
+}
+
 /**
  * Requests in flight per key, so an invalidation can detach them: a detached
- * request leaves the dedupe map and does not store its response.
+ * request leaves the dedupe map and does not store its response. Also the
+ * invalidations whose deletion still runs, so that their entries count as gone
+ * right away.
  */
 export class Flights {
   private readonly byKey = new Map<string, Set<TrackedFlight>>();
+  private readonly invalidations = new Set<Invalidation>();
+
+  /**
+   * Detaches the matching requests in flight and hides the matching entries
+   * stored before, until `deletion` settles
+   */
+  async invalidate<T>(
+    matches: (target: InvalidationTarget) => boolean,
+    deletion: () => Awaitable<T>,
+  ): Promise<T> {
+    this.detach(matches);
+    const invalidation: Invalidation = { matches, stored: new Set() };
+    this.invalidations.add(invalidation);
+
+    try {
+      return await deletion();
+    } finally {
+      this.invalidations.delete(invalidation);
+    }
+  }
+
+  /** Records that `key` was stored after the running invalidations began */
+  stored(key: string): void {
+    for (const invalidation of this.invalidations) {
+      invalidation.stored.add(key);
+    }
+  }
+
+  /** Whether a running invalidation is deleting this entry */
+  hides(entry: CacheEntry): boolean {
+    for (const { matches, stored } of this.invalidations) {
+      if (
+        !stored.has(entry.key) &&
+        matches({ key: entry.key, ...entry.request })
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
 
   track(target: InvalidationTarget, onDetach?: () => void): Flight {
     const { key } = target;

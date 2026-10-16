@@ -48,6 +48,10 @@ export function withCache(
       ? undefined
       : await readEntry(storage, key, report);
 
+    if (entry && flights.hides(entry)) {
+      entry = undefined;
+    }
+
     if (entry && isDead(entry)) {
       await deleteEntry(storage, key, report);
       entry = undefined;
@@ -91,7 +95,7 @@ export function withCache(
         (await isCacheable(key, config, response, cache)) &&
         !flight.detached
       ) {
-        await writeEntry(
+        const written = await writeEntry(
           storage,
           key,
           {
@@ -103,6 +107,10 @@ export function withCache(
           },
           report,
         );
+
+        if (written) {
+          flights.stored(key);
+        }
       }
 
       return response;
@@ -144,11 +152,13 @@ async function writeEntry(
   key: string,
   entry: CacheEntry,
   report: Report,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await storage.set(key, entry);
+    return true;
   } catch (error) {
     report({ operation: "set", key, error });
+    return false;
   }
 }
 
