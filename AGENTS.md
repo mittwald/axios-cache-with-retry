@@ -102,6 +102,11 @@ in the same pre-transform shape.
 - An entry stored after the invalidation began stays visible: `withCache` and
   `retryCache.set` call `flights.stored(key)` once the write has succeeded.
   Calling it before the write would let a read in between take the old entry.
+- A request detached while its `storage.set` still runs must not call
+  `stored()`: its answer is from before the invalidation. When the write lands
+  anyway, `withCache` hides the key with `flights.hideWhile` and deletes it
+  again in the background, since an asynchronous storage may finish the write
+  only after the deletion has settled.
 - `invalidateWhere` hands the predicate `entry.request` for stored entries and
   the same fields for flights, but an entry stored without `request` (by 1.0.x,
   or directly in the storage) passes only `key`, so a predicate on `url` alone
