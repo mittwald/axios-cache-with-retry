@@ -104,9 +104,13 @@ in the same pre-transform shape.
   Calling it before the write would let a read in between take the old entry.
 - A request detached while its `storage.set` still runs must not call
   `stored()`: its answer is from before the invalidation. When the write lands
-  anyway, `withCache` hides the key with `flights.hideWhile` and deletes it
-  again in the background, since an asynchronous storage may finish the write
-  only after the deletion has settled.
+  anyway, `flights.wrote` hides the key with `hideWhile` and deletes it again in
+  the background, since an asynchronous storage may finish the write only after
+  the deletion has settled. `retryCache.set` tracks its write as a flight for
+  the same reason and goes through `flights.wrote` as well.
+- `hides` runs the `invalidateWhere` predicate on cache reads. It treats a
+  predicate that throws as a match, so a broken predicate costs a cache miss and
+  the rejection of `invalidateWhere`, never a failed request.
 - `invalidateWhere` hands the predicate `entry.request` for stored entries and
   the same fields for flights, but an entry stored without `request` (by 1.0.x,
   or directly in the storage) passes only `key`, so a predicate on `url` alone
