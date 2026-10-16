@@ -26,6 +26,9 @@ three don't trip over each other. Built by [mittwald](https://www.mittwald.de).
 - 🔒 **Safe on servers by default**: without a `window`, cache and merging stay
   off until you opt in, and the default key keeps requests with different
   credentials apart.
+- 📜 **Cache headers honoured**: `no-store`, `no-cache`, `private`,
+  `must-revalidate` and `Vary`, each with a switch for APIs that send them where
+  they do not mean it.
 - 🧩 **One adapter** instead of three interceptors, so a retry never runs
   through the cache again and `validateStatus` doesn't change what gets retried.
 
@@ -83,9 +86,11 @@ property for managing the cache.
    `OPTIONS` and methods listed in `cache.methods`); writes are always sent.
 4. **Otherwise the request is sent**, and retried if the method and the outcome
    allow it.
-5. **The final answer is stored** if it is a 2xx and the method is cached. If
-   every attempt failed and `staleIfError` is on, an expired entry is returned
-   instead of the error.
+5. **The final answer is stored** if it is a 2xx, the method is cached and its
+   headers allow it: no `no-store` or `no-cache`, no `private` in a shared
+   cache, no `Vary: *`. If every attempt failed and `staleIfError` is on, an
+   expired entry is returned instead of the error, unless it said
+   `must-revalidate` or belongs to another `Vary` variant.
 
 ## Recipes
 
@@ -332,19 +337,30 @@ A web worker that serves a single user can take the browser defaults with
 
 ### `cache`
 
-| Option         | Default                                         | Description                                                                                                 |
-| -------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `enabled`      | `true` in a browser, `false` without a `window` | Set to `false` to keep the cache off until a request opts in; without a `window`, set it to `true` to cache |
-| `ttl`          | `60000`                                         | How long an entry is answered from the cache, in ms                                                         |
-| `methods`      | `["get","head"]`                                | Methods whose responses are cached                                                                          |
-| `staleIfError` | `false`                                         | Return an expired entry when every attempt failed                                                           |
-| `maxStaleAge`  | unlimited                                       | How long after expiry `staleIfError` may use an entry, in ms                                                |
-| `shouldCache`  | 2xx status                                      | Decides whether a response is stored                                                                        |
+| Option                | Default                                            | Description                                                                                                               |
+| --------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`             | `true` in a browser, `false` without a `window`    | Set to `false` to keep the cache off until a request opts in; without a `window`, set it to `true` to cache               |
+| `ttl`                 | `60000`                                            | How long an entry is answered from the cache, in ms                                                                       |
+| `methods`             | `["get","head"]`                                   | Methods whose responses are cached                                                                                        |
+| `staleIfError`        | `false`                                            | Return an expired entry when every attempt failed                                                                         |
+| `maxStaleAge`         | unlimited                                          | How long after expiry `staleIfError` may use an entry, in ms                                                              |
+| `respectCacheControl` | `true`                                             | Honour `no-store` and `no-cache` (not stored) and `must-revalidate` (never served stale); covers exactly these directives |
+| `shared`              | `true` with the server defaults, `false` otherwise | The cache serves several users, so a `private` response is not stored (`proxy-revalidate` counts too)                     |
+| `vary`                | `true`                                             | Serve an entry only to requests whose headers named in `Vary` match, and never store `Vary: *`                            |
+| `shouldCache`         | 2xx status                                         | Decides whether a response is stored; it can only narrow what the headers allow                                           |
 
 A cache option without `enabled` keeps the default, so without a `window`,
 `cache: { ttl }` alone does not turn the cache on. An entry written without
 `staleIfError` is gone at expiry, also for a later request that has
 `staleIfError` on.
+
+The header rules apply before `shouldCache`, which can say no but never store
+what they exclude. `retryCache.set()` is your own decision, so it stores what
+you hand it whatever the headers say. `Vary` only sees `config.headers`: headers
+the browser adds itself (`Cookie`, `Accept-Language`, `User-Agent`) are
+invisible to axios, so `Vary: Cookie` protects nothing in a browser. A `Vary`
+mismatch is a miss, and the new answer replaces the entry. `max-age`, `s-maxage`
+and `Expires` do not change the lifetime, `ttl` does.
 
 ### `retry`
 
@@ -426,6 +442,9 @@ Entries written by 1.0.x pass only `key` to `invalidateWhere`.
   with a cookie session, call `clear()` when the user changes.
 - **A `Cookie` header that changes with every request** gives every request its
   own key, so nothing is ever served from the cache.
+- **Merged requests share their answer whatever its headers say**: callers that
+  asked at the same time with the same key get the one response, `no-store` or
+  `Vary` included.
 - **The digest is fast and unsalted**, so keys match across processes and a
   shared storage works. Whoever can read the keys of a persistent or shared
   storage can try passwords against them offline: weak Basic-auth passwords can

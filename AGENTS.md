@@ -241,6 +241,27 @@ axios error is passed on as it is.
 **Only 2xx responses are stored by default** because a cached 404 would hide an
 object created later, which is the read-after-write case retry is there for.
 
+**The response headers gate storing before `shouldCache`.** `storePolicy` in
+`src/cache.ts` refuses `no-store` and `no-cache` (the package cannot
+revalidate), `private` when `cache.shared` is on, and `Vary: *`; a custom
+`shouldCache` only runs when that gate is open, so it can narrow but never store
+what the headers exclude. `must-revalidate`, and `proxy-revalidate` in a shared
+cache, do not stop storing but give the entry `staleUntil = expiresAt`, so the
+existing dead-entry logic keeps `staleIfError` away from it. `cache.shared`
+defaults to the runtime (`SERVER_DEFAULTS` has it on). That is why
+`cache: false` resolves to the runtime defaults with `enabled: false` instead of
+`false`: a request that turns the cache back on must still get the right
+`shared`. `retryCache.set()` skips the gate on purpose, and merged callers share
+an answer whatever its headers say.
+
+**An entry stores digests of the request headers named in `Vary`** (`vary` on
+the entry, `null` for an absent header), never the raw values, since
+`Vary: Authorization` would otherwise put credentials into the storage.
+`withCache` treats a mismatch like no entry at all, before the freshness check,
+so neither a hit nor `staleIfError` hands out another variant; the new answer
+then replaces the entry. Only `config.headers` is compared: headers the browser
+or axios' own adapters add later are absent on both sides and always match.
+
 **Cached and deduped responses share their `data` by reference.**
 `cloneResponse` and `responseFromCache` copy the headers and set the caller's
 config but hand out the same body object, so one caller mutating `response.data`
