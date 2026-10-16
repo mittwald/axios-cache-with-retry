@@ -27,4 +27,8 @@ jobs:
       # for trusted publishing is unreliable (pnpm/pnpm#9812, pnpm/pnpm#11513).
       # --access public is redundant with publishConfig, but a release cut
       # before that manifest change would otherwise publish as restricted.
-      - run: npm publish --provenance --access public
+      # A prerelease tag (v2.0.0-rc.1) goes to next; npm refuses it without --tag.
+      - run: |
+          tag=latest
+          case "$GITHUB_REF_NAME" in *-*) tag=next ;; esac
+          npm publish --provenance --access public --tag "$tag"
