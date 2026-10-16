@@ -39,6 +39,16 @@ export interface CacheOptions {
   methods?: string[];
   staleIfError?: boolean;
   maxStaleAge?: number;
+  /**
+   * Honour `no-store` and `no-cache` (not stored) and `must-revalidate` (never
+   * served stale), `true` by default. It covers exactly these directives.
+   */
+  respectCacheControl?: boolean;
+  /**
+   * Whether the cache serves several users, so a `private` response is not
+   * stored. By default `true` with the server defaults, `false` otherwise.
+   */
+  shared?: boolean;
   shouldCache?: (context: CacheDecisionContext) => Awaitable<boolean>;
 }
 
