@@ -376,6 +376,21 @@ describe("Cache-Control options", () => {
     });
   });
 
+  it("serves an s-maxage response stale in a shared cache", async () => {
+    const { adapter, state } = backend({ "cache-control": "s-maxage=60" });
+    const client = setup(adapter, {
+      cache: { ttl: 1, staleIfError: true, shared: true },
+    });
+
+    await client.get("/users");
+    await expire();
+    state.failing = true;
+
+    await expect(client.get("/users")).resolves.toMatchObject({
+      data: { call: 1 },
+    });
+  });
+
   it.each([
     ["No-Store", "Cache-Control"],
     ["public, NO-CACHE", "cache-control"],
