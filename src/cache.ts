@@ -216,7 +216,8 @@ function storePolicy(
     mustRevalidate:
       respect &&
       (directives.has("must-revalidate") ||
-        (cache.shared === true && directives.has("proxy-revalidate"))),
+        (cache.shared === true &&
+          (directives.has("proxy-revalidate") || directives.has("s-maxage")))),
   };
 }
 

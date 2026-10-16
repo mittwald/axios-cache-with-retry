@@ -376,17 +376,24 @@ describe("Cache-Control options", () => {
     });
   });
 
-  it("serves an s-maxage response stale in a shared cache", async () => {
-    const { adapter, state } = backend({ "cache-control": "s-maxage=60" });
-    const client = setup(adapter, {
+  it("does not serve an s-maxage response stale in a shared cache, but does in a browser", async () => {
+    const shared = backend({ "cache-control": "s-maxage=60" });
+    const browser = backend({ "cache-control": "s-maxage=60" });
+    const sharedClient = setup(shared.adapter, {
       cache: { ttl: 1, staleIfError: true, shared: true },
     });
+    const browserClient = setup(browser.adapter, {
+      cache: { ttl: 1, staleIfError: true },
+    });
 
-    await client.get("/users");
+    await sharedClient.get("/users");
+    await browserClient.get("/users");
     await expire();
-    state.failing = true;
+    shared.state.failing = true;
+    browser.state.failing = true;
 
-    await expect(client.get("/users")).resolves.toMatchObject({
+    await expect(sharedClient.get("/users")).rejects.toThrow("network down");
+    await expect(browserClient.get("/users")).resolves.toMatchObject({
       data: { call: 1 },
     });
   });
