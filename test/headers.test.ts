@@ -117,6 +117,24 @@ describe("Cache-Control", () => {
   });
 });
 
+describe("Cache-Control lifetimes", () => {
+  it("keeps the ttl whatever max-age, s-maxage or Expires say", async () => {
+    const { adapter } = backend({
+      "cache-control": "max-age=0, s-maxage=0",
+      expires: "Thu, 01 Jan 1970 00:00:00 GMT",
+    });
+    const client = setup(adapter, {
+      runtime: "server",
+      cache: { enabled: true },
+    });
+
+    await client.get("/users");
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("Cache-Control options", () => {
   it("stores a no-store response with respectCacheControl: false", async () => {
     const { adapter } = backend({ "cache-control": "no-store, no-cache" });
