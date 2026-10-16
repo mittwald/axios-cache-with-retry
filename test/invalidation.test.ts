@@ -588,7 +588,7 @@ const settle = async () => {
 };
 
 describe("a write that lands during an invalidation", () => {
-  it("serves the old answer when its write lands while the deletion still runs", async () => {
+  it("does not serve the old answer when its write lands while the deletion still runs", async () => {
     const gate = gatedWrites();
     const client = setup(counting(), { storage: gate.storage });
 
@@ -601,10 +601,10 @@ describe("a write that lands during an invalidation", () => {
     gate.releaseDeletes();
     await invalidation;
 
-    expect(next.data).toBe("answer 1");
+    expect(next.data).toBe("answer 2");
   });
 
-  it("keeps the old answer when its write lands after the deletion settled", async () => {
+  it("removes the old answer when its write lands after the deletion settled", async () => {
     const gate = gatedWrites();
     const client = setup(counting(), { storage: gate.storage });
 
@@ -618,6 +618,6 @@ describe("a write that lands during an invalidation", () => {
     await settle();
     const next = await client.get("/tickets/1");
 
-    expect(next.data).toBe("answer 1");
+    expect(next.data).toBe("answer 2");
   });
 });
