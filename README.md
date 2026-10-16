@@ -124,8 +124,9 @@ await client.get("/tickets/1"); // request again, the new answer is cached
 An invalidation also reaches requests that are still running: the next caller
 starts a fresh request instead of waiting for one that began before the change,
 and the old answer is not stored. It takes effect as soon as you call it, before
-the storage has finished deleting, so a request started right after it never
-gets the old entry, also without awaiting the returned promise.
+the storage has finished deleting, so a request this process starts right after
+it never gets the old entry, also without awaiting the returned promise. Another
+process reading a shared storage sees the change once the entry is deleted.
 
 ### A server that serves many users
 
@@ -449,6 +450,12 @@ slow storage is still deleting them. Deleting directly in the storage does
 neither, so always go through `client.retryCache`. Instances that share one
 storage are invalidated together. Entries written by 1.0.x pass only `key` to
 `invalidateWhere`.
+
+While a deletion runs, `invalidateWhere` also calls its predicate for every
+cache read, so keep it free of side effects. If it throws, the entries count as
+gone and `invalidateWhere` rejects with that error. A `set()` whose write is
+still running when an invalidation of its key starts is undone, like a request
+in flight.
 
 ## Good to know
 
