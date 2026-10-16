@@ -542,3 +542,82 @@ describe("a request started while an invalidation still deletes", () => {
     expect(entry).toBeUndefined();
   });
 });
+
+/** A memory storage whose writes and deletions wait until released */
+function gatedWrites() {
+  const inner = createMemoryStorage();
+  const sets: (() => void)[] = [];
+  const deletes: (() => void)[] = [];
+  let setsOpen = false;
+  let deletesOpen = false;
+  const storage: RetryCacheStorage = {
+    get: (key) => inner.get(key),
+    set: (key, entry) =>
+      setsOpen
+        ? Promise.resolve(inner.set(key, entry))
+        : new Promise<void>((resolve) =>
+            sets.push(() => resolve(inner.set(key, entry))),
+          ),
+    delete: (key) =>
+      deletesOpen
+        ? Promise.resolve(inner.delete(key))
+        : new Promise<boolean>((resolve) =>
+            deletes.push(() => resolve(inner.delete(key))),
+          ),
+    clear: () => inner.clear(),
+    keys: () => inner.keys(),
+  };
+
+  return {
+    storage,
+    releaseWrites: () => {
+      setsOpen = true;
+      sets.splice(0).forEach((run) => run());
+    },
+    releaseDeletes: () => {
+      deletesOpen = true;
+      deletes.splice(0).forEach((run) => run());
+    },
+  };
+}
+
+const settle = async () => {
+  for (let i = 0; i < 20; i++) {
+    await Promise.resolve();
+  }
+};
+
+describe("a write that lands during an invalidation", () => {
+  it("serves the old answer when its write lands while the deletion still runs", async () => {
+    const gate = gatedWrites();
+    const client = setup(counting(), { storage: gate.storage });
+
+    const first = client.get("/tickets/1");
+    await settle();
+    const invalidation = client.retryCache.invalidate("get:/tickets/1");
+    gate.releaseWrites();
+    await first;
+    const next = await client.get("/tickets/1");
+    gate.releaseDeletes();
+    await invalidation;
+
+    expect(next.data).toBe("answer 1");
+  });
+
+  it("keeps the old answer when its write lands after the deletion settled", async () => {
+    const gate = gatedWrites();
+    const client = setup(counting(), { storage: gate.storage });
+
+    const first = client.get("/tickets/1");
+    await settle();
+    const invalidation = client.retryCache.invalidate("get:/tickets/1");
+    gate.releaseDeletes();
+    await invalidation;
+    gate.releaseWrites();
+    await first;
+    await settle();
+    const next = await client.get("/tickets/1");
+
+    expect(next.data).toBe("answer 1");
+  });
+});
