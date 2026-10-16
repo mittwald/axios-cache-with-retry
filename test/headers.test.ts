@@ -295,6 +295,20 @@ describe("Cache-Control in the request, with options", () => {
 
     expect(adapter).toHaveBeenCalledTimes(1);
   });
+
+  it("merges a no-cache request with one answered from the cache", async () => {
+    const { adapter } = backend();
+    const client = setup(adapter, optIn);
+
+    await client.get("/users");
+    const [, fresh] = await Promise.all([
+      client.get("/users"),
+      client.get("/users", { headers: { "Cache-Control": "no-cache" } }),
+    ]);
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(fresh.data).toEqual({ call: 1 });
+  });
 });
 
 describe("Cache-Control lifetimes", () => {
