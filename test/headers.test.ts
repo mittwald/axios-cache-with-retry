@@ -1,4 +1,8 @@
-import axios, { type AxiosAdapter, type AxiosResponse } from "axios";
+import axios, {
+  AxiosHeaders,
+  type AxiosAdapter,
+  type AxiosResponse,
+} from "axios";
 import { describe, expect, it, vi } from "vitest";
 import {
   createMemoryStorage,
@@ -413,5 +417,41 @@ describe("Vary", () => {
     expect(
       JSON.stringify([...storage.keys()].map((key) => storage.get(key))),
     ).not.toContain("secret-alice");
+  });
+});
+
+describe("headers as the adapters deliver them", () => {
+  const answer = (headers: AxiosHeaders) =>
+    vi.fn<AxiosAdapter>(async (config) => ({
+      config,
+      data: {},
+      status: 200,
+      statusText: "OK",
+      headers,
+    }));
+
+  it("reads Cache-Control from AxiosHeaders", async () => {
+    const adapter = answer(new AxiosHeaders({ "Cache-Control": "no-store" }));
+    const client = setup(adapter);
+
+    await client.get("/users");
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads Vary from AxiosHeaders and compares headers from the instance defaults", async () => {
+    const adapter = answer(new AxiosHeaders({ Vary: "Accept-Language" }));
+    const client = setupAxiosRetryCache(
+      axios.create({ adapter, headers: { "Accept-Language": "de" } }),
+      { retry: false },
+    );
+
+    await client.get("/users");
+    await client.get("/users");
+    client.defaults.headers["Accept-Language"] = "en";
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(2);
   });
 });
