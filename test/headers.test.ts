@@ -574,4 +574,30 @@ describe("headers as the adapters deliver them", () => {
 
     expect(adapter).toHaveBeenCalledTimes(2);
   });
+
+  it("stores the Vary value an adapter adds to config.headers, so the entry never matches again", async () => {
+    let calls = 0;
+    const adapter = vi.fn<AxiosAdapter>(async (config) => {
+      calls += 1;
+      config.headers.set(
+        "Accept-Encoding",
+        "gzip, compress, deflate, br",
+        false,
+      );
+      return {
+        config,
+        data: { call: calls },
+        status: 200,
+        statusText: "OK",
+        headers: new AxiosHeaders({ Vary: "Accept-Encoding" }),
+      };
+    });
+    const client = setup(adapter);
+
+    await client.get("/users");
+    await client.get("/users");
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(3);
+  });
 });
