@@ -245,23 +245,27 @@ object created later, which is the read-after-write case retry is there for.
 `src/cache.ts` refuses `no-store` and `no-cache` (the package cannot
 revalidate), `private` when `cache.shared` is on, and `Vary: *`; a custom
 `shouldCache` only runs when that gate is open, so it can narrow but never store
-what the headers exclude. `must-revalidate`, and `proxy-revalidate` in a shared
-cache, do not stop storing but give the entry `staleUntil = expiresAt`, so the
-existing dead-entry logic keeps `staleIfError` away from it. `cache.shared`
-defaults to the runtime (`SERVER_DEFAULTS` has it on). That is why
-`cache: false` resolves to the runtime defaults with `enabled: false` instead of
-`false`: a request that turns the cache back on must still get the right
-`shared`. `retryCache.set()` skips the gate on purpose, and merged callers share
-an answer whatever its headers say. A qualified directive such as
-`no-cache="Set-Cookie"` or `private="Set-Cookie"` counts like the unqualified
-one: storing the response without the listed fields is not worth the code.
+what the headers exclude. `must-revalidate`, and `proxy-revalidate` or
+`s-maxage` in a shared cache (RFC 9111, section 5.2.2.10), do not stop storing
+but give the entry `staleUntil = expiresAt`, so the existing dead-entry logic
+keeps `staleIfError` away from it. `cache.shared` defaults to the runtime
+(`SERVER_DEFAULTS` has it on). That is why `cache: false` resolves to the
+runtime defaults with `enabled: false` instead of `false`: a request that turns
+the cache back on must still get the right `shared`. `retryCache.set()` skips
+the gate on purpose, and merged callers share an answer whatever its headers
+say. A qualified directive such as `no-cache="Set-Cookie"` or
+`private="Set-Cookie"` counts like the unqualified one: storing the response
+without the listed fields is not worth the code.
 
-**The request's own Cache-Control is read first** (`requestedFreshness` in
-`src/cache.ts`): `no-cache` and `max-age=0` skip the stored entry, also as a
-stale fallback, and still store the fresh answer; `no-store` skips reading and
-storing. RFC 9111 only forbids storing for a `no-store` request; skipping the
-read too is a deliberate, stricter choice. Merging is not affected, and
-`respectCacheControl: false` turns the request side off with the response side.
+**The request's own Cache-Control is an opt-in** (`respectRequestCacheControl`,
+read by `requestedFreshness` in `src/cache.ts`), off by default: clients often
+put `Cache-Control: no-cache` into axios' defaults only to keep the browser's
+HTTP cache out, and would otherwise never get a hit. Once on, `no-cache` and
+`max-age=0` skip the stored entry, also as a stale fallback, and still store the
+fresh answer; `no-store` skips reading and storing. RFC 9111 only forbids
+storing for a `no-store` request; skipping the read too is a deliberate,
+stricter choice. Merging is not affected. The switch is separate from
+`respectCacheControl`, so turning either off keeps the other side's rules.
 
 **An entry stores digests of the request headers named in `Vary`** (`vary` on
 the entry, `null` for an absent header), never the raw values, since
