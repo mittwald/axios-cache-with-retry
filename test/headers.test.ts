@@ -575,7 +575,7 @@ describe("headers as the adapters deliver them", () => {
     expect(adapter).toHaveBeenCalledTimes(2);
   });
 
-  it("stores the Vary value an adapter adds to config.headers, so the entry never matches again", async () => {
+  it("ignores the headers an adapter adds to config.headers when it stores Vary values", async () => {
     let calls = 0;
     const adapter = vi.fn<AxiosAdapter>(async (config) => {
       calls += 1;
@@ -598,6 +598,6 @@ describe("headers as the adapters deliver them", () => {
     await client.get("/users");
     await client.get("/users");
 
-    expect(adapter).toHaveBeenCalledTimes(3);
+    expect(adapter).toHaveBeenCalledTimes(1);
   });
 });

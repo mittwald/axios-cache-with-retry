@@ -60,6 +60,7 @@ export function withCache(
 
     const request = describeRequest(config);
     const flight = flights.track({ key, ...request });
+    const sentHeaders = { ...config.headers };
 
     try {
       let response: AxiosResponse;
@@ -76,7 +77,7 @@ export function withCache(
 
       const policy = asked.skipWrite
         ? undefined
-        : storePolicy(response, config, cache);
+        : storePolicy(response, sentHeaders, cache);
 
       if (
         policy &&
@@ -189,7 +190,7 @@ function requestedFreshness(
  */
 function storePolicy(
   response: AxiosResponse,
-  config: InternalAxiosRequestConfig,
+  requestHeaders: object,
   cache: CacheOptions,
 ): { mustRevalidate: boolean; vary?: CacheEntry["vary"] } | undefined {
   const directives = cacheControlDirectives(response.headers);
@@ -211,7 +212,7 @@ function storePolicy(
   }
 
   return {
-    vary: fields && varyValues(config.headers, fields),
+    vary: fields && varyValues(requestHeaders, fields),
     mustRevalidate:
       respect &&
       (directives.has("must-revalidate") ||
