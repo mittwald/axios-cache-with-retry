@@ -247,14 +247,14 @@ describe("Cache-Control in the request, with options", () => {
     expect(adapter).toHaveBeenCalledTimes(2);
   });
 
-  it("reads a max-age without a value as zero", async () => {
+  it("ignores a max-age without a value", async () => {
     const { adapter } = backend();
     const client = setup(adapter, optIn);
 
     await client.get("/users");
     await client.get("/users", { headers: { "cache-control": "max-age=" } });
 
-    expect(adapter).toHaveBeenCalledTimes(2);
+    expect(adapter).toHaveBeenCalledTimes(1);
   });
 
   it("serves the cached entry to a request with no-cache by default", async () => {
