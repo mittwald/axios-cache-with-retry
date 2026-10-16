@@ -420,3 +420,81 @@ describe("invalidateWhere", () => {
     );
   });
 });
+
+/** An adapter that answers at once, with the number of the call */
+function counting() {
+  let calls = 0;
+  return vi.fn<AxiosAdapter>(async (config) => {
+    calls += 1;
+    return {
+      config,
+      data: `answer ${calls}`,
+      status: 200,
+      statusText: "OK",
+      headers: {},
+    };
+  });
+}
+
+/** A memory storage whose deletions wait until `finish` is called */
+function slowDeletes() {
+  const inner = createMemoryStorage();
+  const waiting: (() => void)[] = [];
+  let finished = false;
+  const later = <T>(run: () => T) =>
+    finished
+      ? Promise.resolve(run())
+      : new Promise<T>((resolve) => waiting.push(() => resolve(run())));
+  const storage: RetryCacheStorage = {
+    get: (key) => inner.get(key),
+    set: (key, entry) => inner.set(key, entry),
+    delete: (key) => later(() => inner.delete(key)),
+    clear: () => later(() => inner.clear()),
+    keys: () => inner.keys(),
+  };
+
+  return {
+    storage,
+    finish: () => {
+      finished = true;
+      waiting.splice(0).forEach((run) => run());
+    },
+  };
+}
+
+type Client = ReturnType<typeof setup>;
+
+const invalidations: Record<string, (client: Client) => Promise<unknown>> = {
+  invalidate: (client) => client.retryCache.invalidate("get:/tickets/1"),
+  invalidatePrefix: (client) =>
+    client.retryCache.invalidatePrefix("get:/tickets/"),
+  invalidateWhere: (client) =>
+    client.retryCache.invalidateWhere(({ key }) => key === "get:/tickets/1"),
+  clear: (client) => client.retryCache.clear(),
+};
+
+describe("a request started while an invalidation still deletes", () => {
+  it.each([
+    ["invalidate", "memory", "answer 2"],
+    ["invalidatePrefix", "memory", "answer 2"],
+    ["invalidateWhere", "memory", "answer 1"],
+    ["clear", "memory", "answer 2"],
+    ["invalidate", "slowly deleting", "answer 1"],
+    ["invalidatePrefix", "slowly deleting", "answer 1"],
+    ["invalidateWhere", "slowly deleting", "answer 1"],
+    ["clear", "slowly deleting", "answer 1"],
+  ])("gets after %s on a %s storage %s", async (method, kind, expected) => {
+    const adapter = counting();
+    const slow = slowDeletes();
+    const storage = kind === "memory" ? createMemoryStorage() : slow.storage;
+    const client = setup(adapter, { storage });
+
+    await client.get("/tickets/1");
+    const invalidation = invalidations[method]?.(client);
+    const next = await client.get("/tickets/1");
+    slow.finish();
+    await invalidation;
+
+    expect(next.data).toBe(expected);
+  });
+});
