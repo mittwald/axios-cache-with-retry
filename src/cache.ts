@@ -108,8 +108,13 @@ export function withCache(
           report,
         );
 
-        if (written) {
+        if (written && !flight.detached) {
           flights.stored(key);
+        } else if (written) {
+          void flights.hideWhile(
+            (target) => target.key === key,
+            () => deleteEntry(storage, key, report),
+          );
         }
       }
 

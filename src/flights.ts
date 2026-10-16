@@ -41,6 +41,14 @@ export class Flights {
     deletion: () => Awaitable<T>,
   ): Promise<T> {
     this.detach(matches);
+    return this.hideWhile(matches, deletion);
+  }
+
+  /** Hides the matching entries stored before, until `deletion` settles */
+  async hideWhile<T>(
+    matches: (target: InvalidationTarget) => boolean,
+    deletion: () => Awaitable<T>,
+  ): Promise<T> {
     const invalidation: Invalidation = { matches, stored: new Set() };
     this.invalidations.add(invalidation);
 
