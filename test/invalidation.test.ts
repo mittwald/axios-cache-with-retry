@@ -626,9 +626,10 @@ describe("a write that lands during an invalidation", () => {
 });
 
 describe("a predicate that throws while its deletion still runs", () => {
-  it("fails a request for an entry the predicate throws on", async () => {
+  it("answers a request from the network when the predicate throws on its entry", async () => {
+    const adapter = counting();
     const slow = slowDeletes();
-    const client = setup(counting(), { storage: slow.storage });
+    const client = setup(adapter, { storage: slow.storage });
 
     await client.get("/tickets/1");
     await client.get("/tickets/2");
@@ -641,13 +642,13 @@ describe("a predicate that throws while its deletion still runs", () => {
       })
       .catch((error: Error) => error.message);
     const other = client.get("/tickets/2").then(
-      () => "answered",
+      (response) => String(response.data),
       (error: Error) => error.message,
     );
     const outcome = await other;
     slow.finish();
 
-    expect(outcome).toBe("predicate failed");
+    expect(outcome).toBe("answer 3");
     expect(await invalidation).toBe("predicate failed");
   });
 });
@@ -662,7 +663,7 @@ describe("retryCache.set while an invalidation of its key starts", () => {
       config: { url: "/tickets/1" },
     }) as unknown as AxiosResponse;
 
-  it("serves the set entry when its write lands while the deletion still runs", async () => {
+  it("does not serve the set entry when its write lands while the deletion still runs", async () => {
     const gate = gatedWrites();
     const client = setup(counting(), { storage: gate.storage });
 
@@ -675,10 +676,10 @@ describe("retryCache.set while an invalidation of its key starts", () => {
     gate.releaseDeletes();
     await invalidation;
 
-    expect(entry?.response.data).toBe("manual");
+    expect(entry).toBeUndefined();
   });
 
-  it("keeps the set entry when its write lands after the deletion settled", async () => {
+  it("removes the set entry when its write lands after the deletion settled", async () => {
     const gate = gatedWrites();
     const client = setup(counting(), { storage: gate.storage });
 
@@ -691,6 +692,6 @@ describe("retryCache.set while an invalidation of its key starts", () => {
     await settle();
     const entry = await client.retryCache.get("get:/tickets/1");
 
-    expect(entry?.response.data).toBe("manual");
+    expect(entry).toBeUndefined();
   });
 });

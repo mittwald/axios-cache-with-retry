@@ -108,13 +108,8 @@ export function withCache(
           report,
         );
 
-        if (written && !flight.detached) {
-          flights.stored(key);
-        } else if (written) {
-          void flights.hideWhile(
-            (target) => target.key === key,
-            () => deleteEntry(storage, key, report),
-          );
+        if (written) {
+          flights.wrote(flight, key, () => deleteEntry(storage, key, report));
         }
       }
 
@@ -140,7 +135,7 @@ async function readEntry(
   }
 }
 
-async function deleteEntry(
+export async function deleteEntry(
   storage: RetryCacheStorage,
   key: string,
   report: Report,
@@ -167,7 +162,7 @@ async function writeEntry(
   }
 }
 
-function reportStorageError(
+export function reportStorageError(
   onStorageError: RetryCacheOptions["onStorageError"],
   context: StorageErrorContext,
 ): void {

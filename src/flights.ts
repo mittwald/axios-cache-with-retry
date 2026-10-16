@@ -66,13 +66,32 @@ export class Flights {
     }
   }
 
+  /**
+   * After a write by `flight` succeeded: keeps the entry, or undoes it when an
+   * invalidation detached the flight while the write ran
+   */
+  wrote(flight: Flight, key: string, deletion: () => Awaitable<unknown>): void {
+    if (!flight.detached) {
+      this.stored(key);
+      return;
+    }
+
+    void this.hideWhile((target) => target.key === key, deletion);
+  }
+
   /** Whether a running invalidation is deleting this entry */
   hides(entry: CacheEntry): boolean {
     for (const { matches, stored } of this.invalidations) {
-      if (
-        !stored.has(entry.key) &&
-        matches({ key: entry.key, ...entry.request })
-      ) {
+      if (stored.has(entry.key)) {
+        continue;
+      }
+
+      try {
+        if (matches({ key: entry.key, ...entry.request })) {
+          return true;
+        }
+      } catch {
+        // The invalidation rejects with this error; until then the entry is gone
         return true;
       }
     }
