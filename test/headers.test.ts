@@ -121,6 +121,52 @@ describe("Cache-Control", () => {
   });
 });
 
+describe("Cache-Control in the request", () => {
+  it("serves a cached entry to a request with no-cache", async () => {
+    const { adapter } = backend();
+    const client = setup(adapter);
+
+    await client.get("/users");
+    await client.get("/users", { headers: { "Cache-Control": "no-cache" } });
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves a cached entry to a request with max-age=0", async () => {
+    const { adapter } = backend();
+    const client = setup(adapter);
+
+    await client.get("/users");
+    await client.get("/users", { headers: { "Cache-Control": "max-age=0" } });
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores the answer to a request with no-store", async () => {
+    const { adapter } = backend();
+    const client = setup(adapter);
+
+    await client.get("/users", { headers: { "Cache-Control": "no-store" } });
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves a stale entry through staleIfError to a request with no-cache", async () => {
+    const { adapter, state } = backend();
+    const client = setup(adapter, { cache: { ttl: 1, staleIfError: true } });
+
+    await client.get("/users");
+    await expire();
+    state.failing = true;
+    const stale: AxiosResponse = await client.get("/users", {
+      headers: { "Cache-Control": "no-cache" },
+    });
+
+    expect(stale.data).toEqual({ call: 1 });
+  });
+});
+
 describe("Cache-Control lifetimes", () => {
   it("keeps the ttl whatever max-age, s-maxage or Expires say", async () => {
     const { adapter } = backend({
