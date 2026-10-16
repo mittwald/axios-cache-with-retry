@@ -85,14 +85,17 @@ property for managing the cache.
    `Cache-Control: no-cache`, `max-age=0` or `no-store`.
 3. **The same request already running?** Then this caller waits for it and gets
    its own copy of the result. This only happens for reads (`GET`, `HEAD`,
-   `OPTIONS` and methods listed in `cache.methods`); writes are always sent.
+   `OPTIONS` and methods listed in `cache.methods`); writes are always sent. A
+   request that skips the cache through `respectRequestCacheControl` neither
+   waits for another one nor lets another one wait for it.
 4. **Otherwise the request is sent**, and retried if the method and the outcome
    allow it.
 5. **The final answer is stored** if it is a 2xx, the method is cached and its
    headers allow it: no `no-store` or `no-cache`, no `private` in a shared
    cache, no `Vary: *`. If every attempt failed and `staleIfError` is on, an
    expired entry is returned instead of the error, unless it said
-   `must-revalidate` or belongs to another `Vary` variant.
+   `must-revalidate` (in a shared cache also `proxy-revalidate` or `s-maxage`)
+   or belongs to another `Vary` variant.
 
 ## Recipes
 
@@ -346,18 +349,18 @@ A web worker that serves a single user can take the browser defaults with
 
 ### `cache`
 
-| Option                       | Default                                            | Description                                                                                                                                                                                                 |
-| ---------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`                    | `true` in a browser, `false` without a `window`    | Set to `false` to keep the cache off until a request opts in; without a `window`, set it to `true` to cache                                                                                                 |
-| `ttl`                        | `60000`                                            | How long an entry is answered from the cache, in ms                                                                                                                                                         |
-| `methods`                    | `["get","head"]`                                   | Methods whose responses are cached                                                                                                                                                                          |
-| `staleIfError`               | `false`                                            | Return an expired entry when every attempt failed                                                                                                                                                           |
-| `maxStaleAge`                | unlimited                                          | How long after expiry `staleIfError` may use an entry, in ms                                                                                                                                                |
-| `respectCacheControl`        | `true`                                             | Honour `no-store` and `no-cache` (not stored) and `must-revalidate` (never served stale) in the response; covers exactly these directives                                                                   |
-| `respectRequestCacheControl` | `false`                                            | Honour the request's own `no-cache` and `max-age=0` (entry skipped) and `no-store` (neither read nor stored); off by default, since clients often send `no-cache` only to keep the browser's HTTP cache out |
-| `shared`                     | `true` with the server defaults, `false` otherwise | The cache serves several users, so a `private` response is not stored, and `proxy-revalidate` and `s-maxage` keep an entry from being served stale                                                          |
-| `vary`                       | `true`                                             | Serve an entry only to requests whose headers named in `Vary` match, and never store `Vary: *`                                                                                                              |
-| `shouldCache`                | 2xx status                                         | Decides whether a response is stored; it can only narrow what the headers allow                                                                                                                             |
+| Option                       | Default                                            | Description                                                                                                                                                                                                                                 |
+| ---------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                    | `true` in a browser, `false` without a `window`    | Set to `false` to keep the cache off until a request opts in; without a `window`, set it to `true` to cache                                                                                                                                 |
+| `ttl`                        | `60000`                                            | How long an entry is answered from the cache, in ms                                                                                                                                                                                         |
+| `methods`                    | `["get","head"]`                                   | Methods whose responses are cached                                                                                                                                                                                                          |
+| `staleIfError`               | `false`                                            | Return an expired entry when every attempt failed                                                                                                                                                                                           |
+| `maxStaleAge`                | unlimited                                          | How long after expiry `staleIfError` may use an entry, in ms                                                                                                                                                                                |
+| `respectCacheControl`        | `true`                                             | Honour `no-store` and `no-cache` (not stored) and `must-revalidate` (never served stale) in the response, in a shared cache also `proxy-revalidate` and `s-maxage`; covers exactly these directives                                         |
+| `respectRequestCacheControl` | `false`                                            | Honour the request's own `no-cache` and `max-age=0` (entry skipped) and `no-store` (neither read nor stored), and never merge such a request; off by default, since clients often send `no-cache` only to keep the browser's HTTP cache out |
+| `shared`                     | `true` with the server defaults, `false` otherwise | The cache serves several users, so a `private` response is not stored, also with `respectCacheControl: false`; with `respectCacheControl` on, `proxy-revalidate` and `s-maxage` keep an entry from being served stale                       |
+| `vary`                       | `true`                                             | Serve an entry only to requests whose headers named in `Vary` match, and never store `Vary: *`                                                                                                                                              |
+| `shouldCache`                | 2xx status                                         | Decides whether a response is stored; it can only narrow what the headers allow                                                                                                                                                             |
 
 A cache option without `enabled` keeps the default, so without a `window`,
 `cache: { ttl }` alone does not turn the cache on. An entry written without
@@ -454,7 +457,8 @@ Entries written by 1.0.x pass only `key` to `invalidateWhere`.
   own key, so nothing is ever served from the cache.
 - **Merged requests share their answer whatever its headers say**: callers that
   asked at the same time with the same key get the one response, `no-store` or
-  `Vary` included.
+  `Vary` included. Only a request that skips the cache through
+  `respectRequestCacheControl` is never merged.
 - **The digest is fast and unsalted**, so keys match across processes and a
   shared storage works. Whoever can read the keys of a persistent or shared
   storage can try passwords against them offline: weak Basic-auth passwords can
