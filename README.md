@@ -80,7 +80,9 @@ property for managing the cache.
    Requests with the same key count as the same request. The key is only built
    when the cache or merging applies to the request; a custom `requestKey`
    replaces all of this.
-2. **Fresh entry in the cache?** Then that is the answer, no request is sent.
+2. **Fresh entry in the cache?** Then that is the answer, no request is sent,
+   unless the request itself sends `Cache-Control: no-cache`, `max-age=0` or
+   `no-store`.
 3. **The same request already running?** Then this caller waits for it and gets
    its own copy of the result. This only happens for reads (`GET`, `HEAD`,
    `OPTIONS` and methods listed in `cache.methods`); writes are always sent.
@@ -152,6 +154,13 @@ await client.get("/me", { headers: { "X-Api-Key": alice } }); // Alice's entry
 A cache option without `enabled: true`, such as `cache: { ttl: 5_000 }`, does
 not turn the cache on there. Which runtimes count as a server is listed under
 [Browser and server defaults](#browser-and-server-defaults).
+
+The cache counts as shared there, so a response marked `private` is not stored;
+an instance that only ever serves one user can say `shared: false`. A shared
+HTTP cache would not reuse an answer to a request with `Authorization` at all
+(RFC 9111, section 3.5); this one does, but only for the same credentials, since
+the default key keeps every user apart. Leave the cache off if that is not what
+you want.
 
 ### Objects that appear a moment after they were created
 
@@ -337,17 +346,17 @@ A web worker that serves a single user can take the browser defaults with
 
 ### `cache`
 
-| Option                | Default                                            | Description                                                                                                               |
-| --------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`             | `true` in a browser, `false` without a `window`    | Set to `false` to keep the cache off until a request opts in; without a `window`, set it to `true` to cache               |
-| `ttl`                 | `60000`                                            | How long an entry is answered from the cache, in ms                                                                       |
-| `methods`             | `["get","head"]`                                   | Methods whose responses are cached                                                                                        |
-| `staleIfError`        | `false`                                            | Return an expired entry when every attempt failed                                                                         |
-| `maxStaleAge`         | unlimited                                          | How long after expiry `staleIfError` may use an entry, in ms                                                              |
-| `respectCacheControl` | `true`                                             | Honour `no-store` and `no-cache` (not stored) and `must-revalidate` (never served stale); covers exactly these directives |
-| `shared`              | `true` with the server defaults, `false` otherwise | The cache serves several users, so a `private` response is not stored (`proxy-revalidate` counts too)                     |
-| `vary`                | `true`                                             | Serve an entry only to requests whose headers named in `Vary` match, and never store `Vary: *`                            |
-| `shouldCache`         | 2xx status                                         | Decides whether a response is stored; it can only narrow what the headers allow                                           |
+| Option                | Default                                            | Description                                                                                                                                                                                          |
+| --------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`             | `true` in a browser, `false` without a `window`    | Set to `false` to keep the cache off until a request opts in; without a `window`, set it to `true` to cache                                                                                          |
+| `ttl`                 | `60000`                                            | How long an entry is answered from the cache, in ms                                                                                                                                                  |
+| `methods`             | `["get","head"]`                                   | Methods whose responses are cached                                                                                                                                                                   |
+| `staleIfError`        | `false`                                            | Return an expired entry when every attempt failed                                                                                                                                                    |
+| `maxStaleAge`         | unlimited                                          | How long after expiry `staleIfError` may use an entry, in ms                                                                                                                                         |
+| `respectCacheControl` | `true`                                             | Honour `no-store` and `no-cache` (not stored) and `must-revalidate` (never served stale) in the response, and `no-cache`, `max-age=0` and `no-store` in the request; covers exactly these directives |
+| `shared`              | `true` with the server defaults, `false` otherwise | The cache serves several users, so a `private` response is not stored (`proxy-revalidate` counts too)                                                                                                |
+| `vary`                | `true`                                             | Serve an entry only to requests whose headers named in `Vary` match, and never store `Vary: *`                                                                                                       |
+| `shouldCache`         | 2xx status                                         | Decides whether a response is stored; it can only narrow what the headers allow                                                                                                                      |
 
 A cache option without `enabled` keeps the default, so without a `window`,
 `cache: { ttl }` alone does not turn the cache on. An entry written without
