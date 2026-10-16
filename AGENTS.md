@@ -370,6 +370,12 @@ with `pnpm version from-git --no-git-tag-version` when a GitHub release is
 published, so hand-bumping the manifest achieves nothing. CI tests on Node 22
 and publishes on Node 24 with npm provenance (`id-token: write`).
 
+A tag with a hyphen (`v2.0.0-rc.1`) is a prerelease: the workflow publishes it
+under the `next` dist-tag, so `latest` and every `^` range stay on the last
+release, and the GitHub release should be marked as a pre-release. npm 11
+refuses to publish a prerelease without `--tag` at all. Install one with
+`npm install @mittwald/axios-cache-with-retry@next` or its exact version.
+
 Three details of that workflow are scar tissue. The trigger is
 `types: [published]` and not `[created]`, because `created` also fires when a
 _draft_ release is saved — and a draft has no tag yet, so the job would check
