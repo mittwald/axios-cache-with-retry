@@ -4,6 +4,7 @@ import type {
   InternalAxiosRequestConfig,
 } from "axios";
 import type { Flights } from "./flights.js";
+import { cacheControlDirectives } from "./headers.js";
 import { describeRequest } from "./key.js";
 import { responseFromCache, snapshotResponse } from "./response.js";
 import type {
@@ -57,7 +58,10 @@ export function withCache(
         throw error;
       }
 
+      const policy = storePolicy(response, cache);
+
       if (
+        policy &&
         (await isCacheable(key, config, response, cache)) &&
         !flight.detached
       ) {
@@ -66,7 +70,7 @@ export function withCache(
           key,
           {
             key,
-            ...entryLifetime(cache),
+            ...entryLifetime(cache, cache.ttl, policy.mustRevalidate),
             response: snapshotResponse(response),
             request,
           },
@@ -136,6 +140,33 @@ function reportStorageError(
   }
 }
 
+/**
+ * Whether the response headers allow storing it, and how; checked before
+ * shouldCache, which can only narrow the decision
+ */
+function storePolicy(
+  response: AxiosResponse,
+  cache: CacheOptions,
+): { mustRevalidate: boolean } | undefined {
+  const directives = cacheControlDirectives(response.headers);
+  const respect = cache.respectCacheControl !== false;
+
+  if (respect && (directives.has("no-store") || directives.has("no-cache"))) {
+    return undefined;
+  }
+
+  if (cache.shared && directives.has("private")) {
+    return undefined;
+  }
+
+  return {
+    mustRevalidate:
+      respect &&
+      (directives.has("must-revalidate") ||
+        (cache.shared === true && directives.has("proxy-revalidate"))),
+  };
+}
+
 function isCacheable(
   key: string,
   config: InternalAxiosRequestConfig,
@@ -159,11 +190,12 @@ export function isDead(entry: CacheEntry, now = Date.now()): boolean {
 export function entryLifetime(
   cache: CacheOptions,
   ttl = cache.ttl,
+  mustRevalidate = false,
 ): Pick<CacheEntry, "createdAt" | "expiresAt" | "staleUntil"> {
   const createdAt = Date.now();
   const expiresAt = createdAt + ttl;
 
-  if (!cache.staleIfError) {
+  if (!cache.staleIfError || mustRevalidate) {
     return { createdAt, expiresAt, staleUntil: expiresAt };
   }
 

@@ -19,6 +19,8 @@ const DEFAULT_CACHE: CacheOptions = {
   ttl: 60_000,
   methods: ["get", "head"],
   staleIfError: false,
+  respectCacheControl: true,
+  shared: false,
 };
 
 const SAFE_METHODS = ["get", "head", "options"];
@@ -34,12 +36,12 @@ const BROWSER_DEFAULTS: RuntimeDefaults = {
 };
 
 const SERVER_DEFAULTS: RuntimeDefaults = {
-  cache: { ...DEFAULT_CACHE, enabled: false },
+  cache: { ...DEFAULT_CACHE, enabled: false, shared: true },
   dedupe: false,
 };
 
 interface ResolvedGlobals extends RetryCacheOptions {
-  cache: CacheOptions | false;
+  cache: CacheOptions;
   dedupe: boolean;
 }
 
@@ -69,7 +71,7 @@ export function setupAxiosRetryCache(
     ...options,
     cache:
       options.cache === false
-        ? false
+        ? { ...runtimeDefaults.cache, enabled: false }
         : normalizeCacheOptions(options.cache, runtimeDefaults.cache),
     dedupe: options.dedupe ?? runtimeDefaults.dedupe,
   };
@@ -138,7 +140,7 @@ export function setupAxiosRetryCache(
       return storage.get(key);
     },
     async set(key, response, setOptions = {}) {
-      const cache = resolvedGlobals.cache || runtimeDefaults.cache;
+      const cache = resolvedGlobals.cache;
       await storage.set(key, {
         key,
         ...entryLifetime(cache, setOptions.ttl),
