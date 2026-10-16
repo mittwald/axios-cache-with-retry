@@ -93,8 +93,15 @@ in the same pre-transform shape.
 - `flightsByStorage` is module-scoped, like `installedAdapters`: with two copies
   of this package, invalidating through one does not detach the flights of the
   other.
-- Every invalidation API on `client.retryCache` has to call `flights.detach`
-  before it deletes; a new one that does not silently brings back #10.
+- Every invalidation API on `client.retryCache` goes through
+  `flights.invalidate`: it detaches the flights and, until the deletion settles,
+  hides the matching entries from `withCache` and `retryCache.get`, so a request
+  started right after the call never gets the old entry, whatever the storage
+  awaits (`deleteWhere` awaits `get` for every key). A new invalidation API that
+  only deletes silently brings back #10.
+- An entry stored after the invalidation began stays visible: `withCache` and
+  `retryCache.set` call `flights.stored(key)` once the write has succeeded.
+  Calling it before the write would let a read in between take the old entry.
 - `invalidateWhere` hands the predicate `entry.request` for stored entries and
   the same fields for flights, but an entry stored without `request` (by 1.0.x,
   or directly in the storage) passes only `key`, so a predicate on `url` alone

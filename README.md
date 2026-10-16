@@ -123,7 +123,9 @@ await client.get("/tickets/1"); // request again, the new answer is cached
 
 An invalidation also reaches requests that are still running: the next caller
 starts a fresh request instead of waiting for one that began before the change,
-and the old answer is not stored.
+and the old answer is not stored. It takes effect as soon as you call it, before
+the storage has finished deleting, so a request started right after it never
+gets the old entry, also without awaiting the returned promise.
 
 ### A server that serves many users
 
@@ -441,10 +443,12 @@ The field is typed on Axios' own `AxiosRequestConfig`.
 | `invalidateWhere(predicate)`  | Delete every entry for which `predicate({ key, method, url, baseURL })` is true |
 | `clear()`                     | Delete everything                                                               |
 
-Every invalidation also detaches matching requests that are still running.
-Deleting directly in the storage does not, so always go through
-`client.retryCache`. Instances that share one storage are invalidated together.
-Entries written by 1.0.x pass only `key` to `invalidateWhere`.
+Every invalidation also detaches matching requests that are still running, and
+the entries it deletes count as gone from the moment it is called, even while a
+slow storage is still deleting them. Deleting directly in the storage does
+neither, so always go through `client.retryCache`. Instances that share one
+storage are invalidated together. Entries written by 1.0.x pass only `key` to
+`invalidateWhere`.
 
 ## Good to know
 
