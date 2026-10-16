@@ -20,6 +20,7 @@ const DEFAULT_CACHE: CacheOptions = {
   methods: ["get", "head"],
   staleIfError: false,
   respectCacheControl: true,
+  respectRequestCacheControl: false,
   shared: false,
   vary: true,
 };
