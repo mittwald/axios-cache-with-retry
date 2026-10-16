@@ -203,7 +203,7 @@ function resolveEffectiveOptions(
 }
 
 function resolveCacheOptions(
-  globalCache: RetryCacheOptions["cache"],
+  globalCache: CacheOptions,
   requestCache: RetryCacheRequestOptions["cache"],
 ): CacheOptions | false {
   if (requestCache === false) {
@@ -211,23 +211,10 @@ function resolveCacheOptions(
   }
 
   if (requestCache === true) {
-    return {
-      ...normalizeCacheOptions(globalCache),
-      enabled: true,
-    };
+    return { ...globalCache, enabled: true };
   }
 
-  if (
-    globalCache === false &&
-    (typeof requestCache !== "object" || requestCache.enabled !== true)
-  ) {
-    return false;
-  }
-
-  const cache = {
-    ...normalizeCacheOptions(globalCache),
-    ...definedOptions(requestCache),
-  };
+  const cache = { ...globalCache, ...definedOptions(requestCache) };
 
   return cache.enabled === false ? false : cache;
 }
@@ -289,7 +276,7 @@ function assertValidRuntime(runtime: RetryCacheOptions["runtime"]): void {
 
 function normalizeCacheOptions(
   cache: RetryCacheOptions["cache"],
-  base: CacheOptions = DEFAULT_CACHE,
+  base: CacheOptions,
 ): CacheOptions {
   return {
     ...base,
