@@ -167,6 +167,22 @@ describe("Cache-Control in the request", () => {
   });
 });
 
+describe("Cache-Control in the instance defaults", () => {
+  it("never answers from the cache when every request sends no-cache", async () => {
+    const { adapter } = backend();
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      retry: false,
+    });
+    client.defaults.headers.common["Cache-Control"] = "no-cache";
+
+    await client.get("/users");
+    await client.get("/users");
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("Cache-Control in the request, with options", () => {
   it("does not serve a cached entry to a request with no-store", async () => {
     const { adapter } = backend();
