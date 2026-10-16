@@ -1,5 +1,11 @@
 import axios, { type AxiosAdapter, type AxiosInstance } from "axios";
-import { entryLifetime, requestedFreshness, withCache } from "./cache.js";
+import {
+  deleteEntry,
+  entryLifetime,
+  reportStorageError,
+  requestedFreshness,
+  withCache,
+} from "./cache.js";
 import { type InflightRequests, withDedupe } from "./dedupe.js";
 import { describeRequest, resolveRequestKey } from "./key.js";
 import { snapshotResponse } from "./response.js";
@@ -147,15 +153,26 @@ export function setupAxiosRetryCache(
     },
     async set(key, response, setOptions = {}) {
       const cache = resolvedGlobals.cache;
-      await storage.set(key, {
-        key,
-        ...entryLifetime(cache, setOptions.ttl),
-        response: snapshotResponse(response),
-        ...(response.config
-          ? { request: describeRequest(response.config) }
-          : {}),
-      });
-      flights.stored(key);
+      const request = response.config
+        ? describeRequest(response.config)
+        : undefined;
+      const flight = flights.track({ key, ...request });
+
+      try {
+        await storage.set(key, {
+          key,
+          ...entryLifetime(cache, setOptions.ttl),
+          response: snapshotResponse(response),
+          ...(request ? { request } : {}),
+        });
+        flights.wrote(flight, key, () =>
+          deleteEntry(storage, key, (context) =>
+            reportStorageError(options.onStorageError, context),
+          ),
+        );
+      } finally {
+        flight.land();
+      }
     },
     async invalidate(key) {
       return flights.invalidate(
