@@ -4,7 +4,12 @@ import type {
   InternalAxiosRequestConfig,
 } from "axios";
 import type { Flights } from "./flights.js";
-import { cacheControlDirectives } from "./headers.js";
+import {
+  cacheControlDirectives,
+  matchesVary,
+  varyFields,
+  varyValues,
+} from "./headers.js";
 import { describeRequest } from "./key.js";
 import { responseFromCache, snapshotResponse } from "./response.js";
 import type {
@@ -38,6 +43,14 @@ export function withCache(
       entry = undefined;
     }
 
+    if (
+      entry &&
+      cache.vary !== false &&
+      !matchesVary(entry.vary, config.headers)
+    ) {
+      entry = undefined;
+    }
+
     if (entry && isFresh(entry)) {
       return responseFromCache(entry, config);
     }
@@ -58,7 +71,7 @@ export function withCache(
         throw error;
       }
 
-      const policy = storePolicy(response, cache);
+      const policy = storePolicy(response, config, cache);
 
       if (
         policy &&
@@ -73,6 +86,7 @@ export function withCache(
             ...entryLifetime(cache, cache.ttl, policy.mustRevalidate),
             response: snapshotResponse(response),
             request,
+            ...(policy.vary ? { vary: policy.vary } : {}),
           },
           report,
         );
@@ -146,8 +160,9 @@ function reportStorageError(
  */
 function storePolicy(
   response: AxiosResponse,
+  config: InternalAxiosRequestConfig,
   cache: CacheOptions,
-): { mustRevalidate: boolean } | undefined {
+): { mustRevalidate: boolean; vary?: CacheEntry["vary"] } | undefined {
   const directives = cacheControlDirectives(response.headers);
   const respect = cache.respectCacheControl !== false;
 
@@ -159,7 +174,15 @@ function storePolicy(
     return undefined;
   }
 
+  const fields =
+    cache.vary === false ? undefined : varyFields(response.headers);
+
+  if (fields === "*") {
+    return undefined;
+  }
+
   return {
+    vary: fields && varyValues(config.headers, fields),
     mustRevalidate:
       respect &&
       (directives.has("must-revalidate") ||

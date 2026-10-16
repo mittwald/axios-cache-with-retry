@@ -21,6 +21,7 @@ const DEFAULT_CACHE: CacheOptions = {
   staleIfError: false,
   respectCacheControl: true,
   shared: false,
+  vary: true,
 };
 
 const SAFE_METHODS = ["get", "head", "options"];
