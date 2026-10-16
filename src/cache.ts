@@ -168,7 +168,7 @@ function requestedFreshness(
   config: InternalAxiosRequestConfig,
   cache: CacheOptions,
 ): { skipRead: boolean; skipWrite: boolean } {
-  if (cache.respectCacheControl === false) {
+  if (cache.respectRequestCacheControl !== true) {
     return { skipRead: false, skipWrite: false };
   }
 

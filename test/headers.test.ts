@@ -122,9 +122,11 @@ describe("Cache-Control", () => {
 });
 
 describe("Cache-Control in the request", () => {
+  const optIn = { cache: { respectRequestCacheControl: true } };
+
   it("fetches anew for a request with no-cache and stores the fresh answer", async () => {
     const { adapter } = backend();
-    const client = setup(adapter);
+    const client = setup(adapter, optIn);
 
     await client.get("/users");
     await client.get("/users", { headers: { "Cache-Control": "no-cache" } });
@@ -136,7 +138,7 @@ describe("Cache-Control in the request", () => {
 
   it("fetches anew for a request with max-age=0", async () => {
     const { adapter } = backend();
-    const client = setup(adapter);
+    const client = setup(adapter, optIn);
 
     await client.get("/users");
     await client.get("/users", { headers: { "Cache-Control": "max-age=0" } });
@@ -146,7 +148,7 @@ describe("Cache-Control in the request", () => {
 
   it("does not store the answer to a request with no-store", async () => {
     const { adapter } = backend();
-    const client = setup(adapter);
+    const client = setup(adapter, optIn);
 
     await client.get("/users", { headers: { "Cache-Control": "no-store" } });
     await client.get("/users");
@@ -156,7 +158,9 @@ describe("Cache-Control in the request", () => {
 
   it("does not serve a stale entry through staleIfError to a request with no-cache", async () => {
     const { adapter, state } = backend();
-    const client = setup(adapter, { cache: { ttl: 1, staleIfError: true } });
+    const client = setup(adapter, {
+      cache: { ttl: 1, staleIfError: true, respectRequestCacheControl: true },
+    });
 
     await client.get("/users");
     await expire();
@@ -168,7 +172,9 @@ describe("Cache-Control in the request", () => {
 });
 
 describe("Cache-Control in the instance defaults", () => {
-  it("never answers from the cache when every request sends no-cache", async () => {
+  const optIn = { cache: { respectRequestCacheControl: true } };
+
+  it("keeps answering from the cache when every request sends no-cache", async () => {
     const { adapter } = backend();
     const client = setupAxiosRetryCache(axios.create({ adapter }), {
       retry: false,
@@ -179,14 +185,30 @@ describe("Cache-Control in the instance defaults", () => {
     await client.get("/users");
     await client.get("/users");
 
-    expect(adapter).toHaveBeenCalledTimes(3);
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches every request anew once the request side is turned on", async () => {
+    const { adapter } = backend();
+    const client = setupAxiosRetryCache(axios.create({ adapter }), {
+      retry: false,
+      ...optIn,
+    });
+    client.defaults.headers.common["Cache-Control"] = "no-cache";
+
+    await client.get("/users");
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("Cache-Control in the request, with options", () => {
+  const optIn = { cache: { respectRequestCacheControl: true } };
+
   it("does not serve a cached entry to a request with no-store", async () => {
     const { adapter } = backend();
-    const client = setup(adapter);
+    const client = setup(adapter, optIn);
 
     await client.get("/users");
     await client.get("/users", { headers: { "Cache-Control": "no-store" } });
@@ -196,7 +218,7 @@ describe("Cache-Control in the request, with options", () => {
 
   it("reads a quoted max-age of zero", async () => {
     const { adapter } = backend();
-    const client = setup(adapter);
+    const client = setup(adapter, optIn);
 
     await client.get("/users");
     await client.get("/users", { headers: { "cache-control": 'max-age="0"' } });
@@ -204,9 +226,9 @@ describe("Cache-Control in the request, with options", () => {
     expect(adapter).toHaveBeenCalledTimes(2);
   });
 
-  it("serves the cached entry with respectCacheControl: false", async () => {
+  it("serves the cached entry to a request with no-cache by default", async () => {
     const { adapter } = backend();
-    const client = setup(adapter, { cache: { respectCacheControl: false } });
+    const client = setup(adapter);
     const noCache = { headers: { "Cache-Control": "no-cache, no-store" } };
 
     await client.get("/users", noCache);
@@ -215,14 +237,32 @@ describe("Cache-Control in the request, with options", () => {
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the two switches apart", async () => {
+    const response = backend({ "cache-control": "no-store" });
+    const request = backend();
+    const responseRulesOnly = setup(response.adapter);
+    const requestSideOnly = setup(request.adapter, {
+      cache: { respectCacheControl: false, respectRequestCacheControl: true },
+    });
+    const noCache = { headers: { "Cache-Control": "no-cache" } };
+
+    await responseRulesOnly.get("/users");
+    await responseRulesOnly.get("/users");
+    await requestSideOnly.get("/users");
+    await requestSideOnly.get("/users", noCache);
+
+    expect(response.adapter).toHaveBeenCalledTimes(2);
+    expect(request.adapter).toHaveBeenCalledTimes(2);
+  });
+
   it("lets a single request ignore its own Cache-Control", async () => {
     const { adapter } = backend();
-    const client = setup(adapter);
+    const client = setup(adapter, optIn);
 
     await client.get("/users");
     await client.get("/users", {
       headers: { "Cache-Control": "no-cache" },
-      retryCache: { cache: { respectCacheControl: false } },
+      retryCache: { cache: { respectRequestCacheControl: false } },
     });
 
     expect(adapter).toHaveBeenCalledTimes(1);
@@ -243,7 +283,7 @@ describe("Cache-Control in the request, with options", () => {
             });
         }),
     );
-    const client = setup(adapter, { retry: { delay: 0 } });
+    const client = setup(adapter, { ...optIn, retry: { delay: 0 } });
 
     const first = client.get("/users");
     await vi.waitFor(() => expect(adapter).toHaveBeenCalledTimes(1));
