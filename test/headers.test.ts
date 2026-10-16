@@ -122,48 +122,122 @@ describe("Cache-Control", () => {
 });
 
 describe("Cache-Control in the request", () => {
-  it("serves a cached entry to a request with no-cache", async () => {
+  it("fetches anew for a request with no-cache and stores the fresh answer", async () => {
     const { adapter } = backend();
     const client = setup(adapter);
 
     await client.get("/users");
     await client.get("/users", { headers: { "Cache-Control": "no-cache" } });
+    const next: AxiosResponse = await client.get("/users");
 
-    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(adapter).toHaveBeenCalledTimes(2);
+    expect(next.data).toEqual({ call: 2 });
   });
 
-  it("serves a cached entry to a request with max-age=0", async () => {
+  it("fetches anew for a request with max-age=0", async () => {
     const { adapter } = backend();
     const client = setup(adapter);
 
     await client.get("/users");
     await client.get("/users", { headers: { "Cache-Control": "max-age=0" } });
 
-    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(adapter).toHaveBeenCalledTimes(2);
   });
 
-  it("stores the answer to a request with no-store", async () => {
+  it("does not store the answer to a request with no-store", async () => {
     const { adapter } = backend();
     const client = setup(adapter);
 
     await client.get("/users", { headers: { "Cache-Control": "no-store" } });
     await client.get("/users");
 
-    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(adapter).toHaveBeenCalledTimes(2);
   });
 
-  it("serves a stale entry through staleIfError to a request with no-cache", async () => {
+  it("does not serve a stale entry through staleIfError to a request with no-cache", async () => {
     const { adapter, state } = backend();
     const client = setup(adapter, { cache: { ttl: 1, staleIfError: true } });
 
     await client.get("/users");
     await expire();
     state.failing = true;
-    const stale: AxiosResponse = await client.get("/users", {
+    await expect(
+      client.get("/users", { headers: { "Cache-Control": "no-cache" } }),
+    ).rejects.toThrow("network down");
+  });
+});
+
+describe("Cache-Control in the request, with options", () => {
+  it("does not serve a cached entry to a request with no-store", async () => {
+    const { adapter } = backend();
+    const client = setup(adapter);
+
+    await client.get("/users");
+    await client.get("/users", { headers: { "Cache-Control": "no-store" } });
+
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads a quoted max-age of zero", async () => {
+    const { adapter } = backend();
+    const client = setup(adapter);
+
+    await client.get("/users");
+    await client.get("/users", { headers: { "cache-control": 'max-age="0"' } });
+
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("serves the cached entry with respectCacheControl: false", async () => {
+    const { adapter } = backend();
+    const client = setup(adapter, { cache: { respectCacheControl: false } });
+    const noCache = { headers: { "Cache-Control": "no-cache, no-store" } };
+
+    await client.get("/users", noCache);
+    await client.get("/users", noCache);
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a single request ignore its own Cache-Control", async () => {
+    const { adapter } = backend();
+    const client = setup(adapter);
+
+    await client.get("/users");
+    await client.get("/users", {
       headers: { "Cache-Control": "no-cache" },
+      retryCache: { cache: { respectCacheControl: false } },
     });
 
-    expect(stale.data).toEqual({ call: 1 });
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("still merges a no-cache request with one already running", async () => {
+    let answer = () => undefined as void;
+    const adapter = vi.fn<AxiosAdapter>(
+      (config) =>
+        new Promise((resolve) => {
+          answer = () =>
+            resolve({
+              config,
+              data: {},
+              status: 200,
+              statusText: "OK",
+              headers: {},
+            });
+        }),
+    );
+    const client = setup(adapter, { retry: { delay: 0 } });
+
+    const first = client.get("/users");
+    await vi.waitFor(() => expect(adapter).toHaveBeenCalledTimes(1));
+    const second = client.get("/users", {
+      headers: { "Cache-Control": "no-cache" },
+    });
+    answer();
+    await Promise.all([first, second]);
+
+    expect(adapter).toHaveBeenCalledTimes(1);
   });
 });
 

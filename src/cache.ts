@@ -36,7 +36,10 @@ export function withCache(
     reportStorageError(onStorageError, context);
 
   return async (config) => {
-    let entry = await readEntry(storage, key, report);
+    const asked = requestedFreshness(config, cache);
+    let entry = asked.skipRead
+      ? undefined
+      : await readEntry(storage, key, report);
 
     if (entry && isDead(entry)) {
       await deleteEntry(storage, key, report);
@@ -71,7 +74,9 @@ export function withCache(
         throw error;
       }
 
-      const policy = storePolicy(response, config, cache);
+      const policy = asked.skipWrite
+        ? undefined
+        : storePolicy(response, config, cache);
 
       if (
         policy &&
@@ -152,6 +157,30 @@ function reportStorageError(
   } catch {
     return;
   }
+}
+
+/**
+ * What the request's own Cache-Control asks for: no-cache and max-age=0 skip
+ * the stored entry, no-store also keeps the answer out of the cache
+ */
+function requestedFreshness(
+  config: InternalAxiosRequestConfig,
+  cache: CacheOptions,
+): { skipRead: boolean; skipWrite: boolean } {
+  if (cache.respectCacheControl === false) {
+    return { skipRead: false, skipWrite: false };
+  }
+
+  const directives = cacheControlDirectives(config.headers);
+  const skipWrite = directives.has("no-store");
+
+  return {
+    skipRead:
+      skipWrite ||
+      directives.has("no-cache") ||
+      Number(directives.get("max-age")) === 0,
+    skipWrite,
+  };
 }
 
 /**

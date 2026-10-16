@@ -22,16 +22,37 @@ export function readHeader(headers: unknown, name: string): string | undefined {
   return undefined;
 }
 
-/** The lowercased directive names of a `Cache-Control` header */
-export function cacheControlDirectives(headers: unknown): Set<string> {
-  const value = readHeader(headers, "cache-control") ?? "";
+/**
+ * The directives of a `Cache-Control` header by lowercased name, with their
+ * unquoted value if they have one
+ */
+export function cacheControlDirectives(
+  headers: unknown,
+): Map<string, string | undefined> {
+  const directives = new Map<string, string | undefined>();
 
-  return new Set(
-    value
-      .split(",")
-      .map((directive) => directive.split("=")[0]?.trim().toLowerCase() ?? "")
-      .filter(Boolean),
-  );
+  for (const directive of (readHeader(headers, "cache-control") ?? "").split(
+    ",",
+  )) {
+    const separator = directive.indexOf("=");
+    const name = (separator === -1 ? directive : directive.slice(0, separator))
+      .trim()
+      .toLowerCase();
+
+    if (name) {
+      directives.set(
+        name,
+        separator === -1
+          ? undefined
+          : directive
+              .slice(separator + 1)
+              .trim()
+              .replace(/^"|"$/g, ""),
+      );
+    }
+  }
+
+  return directives;
 }
 
 /** The lowercased field names of a `Vary` header, or `"*"` */
