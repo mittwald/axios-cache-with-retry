@@ -41,7 +41,9 @@ export interface CacheOptions {
   maxStaleAge?: number;
   /**
    * Honour `no-store` and `no-cache` (not stored) and `must-revalidate` (never
-   * served stale), `true` by default. It covers exactly these directives.
+   * served stale) in the response, and `no-cache`, `max-age=0` (entry skipped)
+   * and `no-store` (neither read nor stored) in the request; `true` by default.
+   * It covers exactly these directives.
    */
   respectCacheControl?: boolean;
   /**
