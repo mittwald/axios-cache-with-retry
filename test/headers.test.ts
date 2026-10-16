@@ -35,6 +35,27 @@ function backend(headers: Record<string, string> = {}) {
   return { adapter, state };
 }
 
+/** Holds every request until `answerAll` is called */
+function heldBackend() {
+  const answers: (() => void)[] = [];
+  const adapter = vi.fn<AxiosAdapter>(
+    (config) =>
+      new Promise((resolve) => {
+        answers.push(() =>
+          resolve({
+            config,
+            data: {},
+            status: 200,
+            statusText: "OK",
+            headers: {},
+          }),
+        );
+      }),
+  );
+
+  return { adapter, answerAll: () => answers.forEach((answer) => answer()) };
+}
+
 function setup(adapter: AxiosAdapter, options: RetryCacheOptions = {}) {
   return setupAxiosRetryCache(axios.create({ adapter }), {
     retry: false,
@@ -268,35 +289,39 @@ describe("Cache-Control in the request, with options", () => {
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("still merges a no-cache request with one already running", async () => {
-    let answer = () => undefined as void;
-    const adapter = vi.fn<AxiosAdapter>(
-      (config) =>
-        new Promise((resolve) => {
-          answer = () =>
-            resolve({
-              config,
-              data: {},
-              status: 200,
-              statusText: "OK",
-              headers: {},
-            });
-        }),
-    );
-    const client = setup(adapter, { ...optIn, retry: { delay: 0 } });
+  it("does not merge a no-cache request with one already running", async () => {
+    const { adapter, answerAll } = heldBackend();
+    const client = setup(adapter, optIn);
 
     const first = client.get("/users");
     await vi.waitFor(() => expect(adapter).toHaveBeenCalledTimes(1));
     const second = client.get("/users", {
       headers: { "Cache-Control": "no-cache" },
     });
-    answer();
+    await vi.waitFor(() => expect(adapter).toHaveBeenCalledTimes(2));
+    answerAll();
     await Promise.all([first, second]);
 
-    expect(adapter).toHaveBeenCalledTimes(1);
+    expect(adapter).toHaveBeenCalledTimes(2);
   });
 
-  it("merges a no-cache request with one answered from the cache", async () => {
+  it("does not let a request join a no-cache request already running", async () => {
+    const { adapter, answerAll } = heldBackend();
+    const client = setup(adapter, optIn);
+
+    const first = client.get("/users", {
+      headers: { "Cache-Control": "no-cache" },
+    });
+    await vi.waitFor(() => expect(adapter).toHaveBeenCalledTimes(1));
+    const second = client.get("/users");
+    await vi.waitFor(() => expect(adapter).toHaveBeenCalledTimes(2));
+    answerAll();
+    await Promise.all([first, second]);
+
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not merge a no-cache request with one answered from the cache", async () => {
     const { adapter } = backend();
     const client = setup(adapter, optIn);
 
@@ -306,8 +331,8 @@ describe("Cache-Control in the request, with options", () => {
       client.get("/users", { headers: { "Cache-Control": "no-cache" } }),
     ]);
 
-    expect(adapter).toHaveBeenCalledTimes(1);
-    expect(fresh.data).toEqual({ call: 1 });
+    expect(adapter).toHaveBeenCalledTimes(2);
+    expect(fresh.data).toEqual({ call: 2 });
   });
 });
 

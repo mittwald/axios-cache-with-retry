@@ -1,5 +1,5 @@
 import axios, { type AxiosAdapter, type AxiosInstance } from "axios";
-import { entryLifetime, withCache } from "./cache.js";
+import { entryLifetime, requestedFreshness, withCache } from "./cache.js";
 import { type InflightRequests, withDedupe } from "./dedupe.js";
 import { describeRequest, resolveRequestKey } from "./key.js";
 import { snapshotResponse } from "./response.js";
@@ -103,8 +103,10 @@ export function setupAxiosRetryCache(
       effective.cache && methodAllowed(method, effective.cache.methods)
         ? effective.cache
         : undefined;
+    const freshness = requestedFreshness(config, cache);
     const dedupeEnabled =
       effective.dedupe !== false &&
+      !freshness.skipRead &&
       (cache !== undefined || SAFE_METHODS.includes(method));
 
     if (!cache && !effective.retry) {
@@ -122,6 +124,7 @@ export function setupAxiosRetryCache(
       adapter = withCache(adapter, {
         key: requestKey,
         cache,
+        freshness,
         storage,
         flights,
         onStorageError: options.onStorageError,

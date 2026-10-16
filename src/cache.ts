@@ -23,6 +23,7 @@ import type {
 export interface CacheLayerOptions {
   key: string;
   cache: CacheOptions;
+  freshness: RequestedFreshness;
   storage: RetryCacheStorage;
   flights: Flights;
   onStorageError?: RetryCacheOptions["onStorageError"];
@@ -30,14 +31,20 @@ export interface CacheLayerOptions {
 
 export function withCache(
   adapter: AxiosAdapter,
-  { key, cache, storage, flights, onStorageError }: CacheLayerOptions,
+  {
+    key,
+    cache,
+    freshness,
+    storage,
+    flights,
+    onStorageError,
+  }: CacheLayerOptions,
 ): AxiosAdapter {
   const report = (context: StorageErrorContext) =>
     reportStorageError(onStorageError, context);
 
   return async (config) => {
-    const asked = requestedFreshness(config, cache);
-    let entry = asked.skipRead
+    let entry = freshness.skipRead
       ? undefined
       : await readEntry(storage, key, report);
 
@@ -75,7 +82,7 @@ export function withCache(
         throw error;
       }
 
-      const policy = asked.skipWrite
+      const policy = freshness.skipWrite
         ? undefined
         : storePolicy(response, sentHeaders, cache);
 
@@ -160,15 +167,20 @@ function reportStorageError(
   }
 }
 
+export interface RequestedFreshness {
+  skipRead: boolean;
+  skipWrite: boolean;
+}
+
 /**
  * What the request's own Cache-Control asks for: no-cache and max-age=0 skip
  * the stored entry, no-store also keeps the answer out of the cache
  */
-function requestedFreshness(
+export function requestedFreshness(
   config: InternalAxiosRequestConfig,
-  cache: CacheOptions,
-): { skipRead: boolean; skipWrite: boolean } {
-  if (cache.respectRequestCacheControl !== true) {
+  cache: CacheOptions | undefined,
+): RequestedFreshness {
+  if (cache?.respectRequestCacheControl !== true) {
     return { skipRead: false, skipWrite: false };
   }
 
