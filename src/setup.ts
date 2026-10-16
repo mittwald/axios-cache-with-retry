@@ -142,7 +142,8 @@ export function setupAxiosRetryCache(
 
   client.retryCache = {
     async get(key) {
-      return storage.get(key);
+      const entry = await storage.get(key);
+      return entry && !flights.hides(entry) ? entry : undefined;
     },
     async set(key, response, setOptions = {}) {
       const cache = resolvedGlobals.cache;
@@ -154,22 +155,30 @@ export function setupAxiosRetryCache(
           ? { request: describeRequest(response.config) }
           : {}),
       });
+      flights.stored(key);
     },
     async invalidate(key) {
-      flights.detach((target) => target.key === key);
-      return storage.delete(key);
+      return flights.invalidate(
+        (target) => target.key === key,
+        () => storage.delete(key),
+      );
     },
     async invalidatePrefix(prefix) {
-      flights.detach((target) => target.key.startsWith(prefix));
-      return deletePrefix(storage, prefix);
+      return flights.invalidate(
+        (target) => target.key.startsWith(prefix),
+        () => deletePrefix(storage, prefix),
+      );
     },
     async invalidateWhere(predicate) {
-      flights.detach(predicate);
-      return deleteWhere(storage, predicate);
+      return flights.invalidate(predicate, () =>
+        deleteWhere(storage, predicate),
+      );
     },
     async clear() {
-      flights.detach(() => true);
-      await storage.clear();
+      await flights.invalidate(
+        () => true,
+        () => storage.clear(),
+      );
     },
   };
 

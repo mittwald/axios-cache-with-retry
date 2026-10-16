@@ -475,15 +475,15 @@ const invalidations: Record<string, (client: Client) => Promise<unknown>> = {
 
 describe("a request started while an invalidation still deletes", () => {
   it.each([
-    ["invalidate", "memory", "answer 2"],
-    ["invalidatePrefix", "memory", "answer 2"],
-    ["invalidateWhere", "memory", "answer 1"],
-    ["clear", "memory", "answer 2"],
-    ["invalidate", "slowly deleting", "answer 1"],
-    ["invalidatePrefix", "slowly deleting", "answer 1"],
-    ["invalidateWhere", "slowly deleting", "answer 1"],
-    ["clear", "slowly deleting", "answer 1"],
-  ])("gets after %s on a %s storage %s", async (method, kind, expected) => {
+    ["invalidate", "memory"],
+    ["invalidatePrefix", "memory"],
+    ["invalidateWhere", "memory"],
+    ["clear", "memory"],
+    ["invalidate", "slowly deleting"],
+    ["invalidatePrefix", "slowly deleting"],
+    ["invalidateWhere", "slowly deleting"],
+    ["clear", "slowly deleting"],
+  ])("gets a fresh answer after %s on a %s storage", async (method, kind) => {
     const adapter = counting();
     const slow = slowDeletes();
     const storage = kind === "memory" ? createMemoryStorage() : slow.storage;
@@ -495,6 +495,50 @@ describe("a request started while an invalidation still deletes", () => {
     slow.finish();
     await invalidation;
 
-    expect(next.data).toBe(expected);
+    expect(next.data).toBe("answer 2");
+  });
+
+  it("serves an entry stored after the invalidation began", async () => {
+    const adapter = counting();
+    const slow = slowDeletes();
+    const client = setup(adapter, { storage: slow.storage });
+
+    await client.get("/tickets/1");
+    const invalidation = client.retryCache.invalidate("get:/tickets/1");
+    await client.get("/tickets/1");
+    const cached = await client.get("/tickets/1");
+    slow.finish();
+    await invalidation;
+
+    expect(cached.data).toBe("answer 2");
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("serves the entries the invalidation does not match", async () => {
+    const adapter = counting();
+    const slow = slowDeletes();
+    const client = setup(adapter, { storage: slow.storage });
+
+    await client.get("/tickets/2");
+    const invalidation = client.retryCache.invalidate("get:/tickets/1");
+    const other = await client.get("/tickets/2");
+    slow.finish();
+    await invalidation;
+
+    expect(other.data).toBe("answer 1");
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not hand out the entry through retryCache.get", async () => {
+    const slow = slowDeletes();
+    const client = setup(counting(), { storage: slow.storage });
+
+    await client.get("/tickets/1");
+    const invalidation = client.retryCache.invalidate("get:/tickets/1");
+    const entry = await client.retryCache.get("get:/tickets/1");
+    slow.finish();
+    await invalidation;
+
+    expect(entry).toBeUndefined();
   });
 });
