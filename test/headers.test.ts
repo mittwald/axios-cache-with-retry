@@ -503,6 +503,40 @@ describe("Cache-Control options", () => {
     });
   });
 
+  it("keeps a private response out of a shared cache with respectCacheControl: false", async () => {
+    const { adapter } = backend({ "cache-control": "private" });
+    const client = setup(adapter, {
+      cache: { shared: true, respectCacheControl: false },
+    });
+
+    await client.get("/users");
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["proxy-revalidate", "s-maxage=60"])(
+    "serves a %s response stale in a shared cache with respectCacheControl: false",
+    async (value) => {
+      const { adapter, state } = backend({ "cache-control": value });
+      const client = setup(adapter, {
+        cache: {
+          ttl: 1,
+          staleIfError: true,
+          shared: true,
+          respectCacheControl: false,
+        },
+      });
+
+      await client.get("/users");
+      await expire();
+      state.failing = true;
+      const stale: AxiosResponse = await client.get("/users");
+
+      expect(stale.data).toEqual({ call: 1 });
+    },
+  );
+
   it.each([
     ["No-Store", "Cache-Control"],
     ["public, NO-CACHE", "cache-control"],
