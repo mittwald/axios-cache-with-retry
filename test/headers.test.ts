@@ -1,6 +1,10 @@
 import axios, { type AxiosAdapter, type AxiosResponse } from "axios";
 import { describe, expect, it, vi } from "vitest";
-import { type RetryCacheOptions, setupAxiosRetryCache } from "../src/index.js";
+import {
+  createMemoryStorage,
+  type RetryCacheOptions,
+  setupAxiosRetryCache,
+} from "../src/index.js";
 
 /**
  * Answers 200 with the given headers and a counter, or fails while `failing` is
@@ -262,9 +266,81 @@ describe("Cache-Control options", () => {
 });
 
 describe("Vary", () => {
-  it("serves an entry to a request with another value of a header named in Vary", async () => {
+  it("does not serve an entry to a request with another value of a header named in Vary", async () => {
     const { adapter } = backend({ vary: "Accept-Language" });
     const client = setup(adapter);
+
+    await client.get("/users", { headers: { "Accept-Language": "de" } });
+    await client.get("/users", { headers: { "Accept-Language": "en" } });
+
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not store a response with Vary: *", async () => {
+    const { adapter } = backend({ vary: "*" });
+    const client = setup(adapter);
+
+    await client.get("/users");
+    await client.get("/users");
+
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not serve an entry of another variant stale through staleIfError", async () => {
+    const { adapter, state } = backend({ vary: "Accept-Language" });
+    const client = setup(adapter, { cache: { ttl: 1, staleIfError: true } });
+
+    await client.get("/users", { headers: { "Accept-Language": "de" } });
+    await expire();
+    state.failing = true;
+    await expect(
+      client.get("/users", { headers: { "Accept-Language": "en" } }),
+    ).rejects.toThrow("network down");
+  });
+
+  it("serves an entry to requests with the same values or the same absent header", async () => {
+    const { adapter } = backend({ vary: "Accept-Language" });
+    const client = setup(adapter);
+
+    await client.get("/users", { headers: { "Accept-Language": "de" } });
+    await client.get("/users", { headers: { "accept-language": "de" } });
+    await client.get("/profile");
+    await client.get("/profile");
+
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("replaces the entry with the answer to another variant", async () => {
+    const { adapter } = backend({ vary: "Accept-Language" });
+    const client = setup(adapter);
+    const de = { headers: { "Accept-Language": "de" } };
+    const en = { headers: { "Accept-Language": "en" } };
+
+    await client.get("/users", de);
+    await client.get("/users", en);
+    await client.get("/users", en);
+    await client.get("/users", de);
+
+    expect(adapter).toHaveBeenCalledTimes(3);
+  });
+
+  it("compares every field of a Vary list, whatever its spacing and casing", async () => {
+    const { adapter } = backend({ vary: "Accept-Language , X-TENANT" });
+    const client = setup(adapter);
+    const request = (tenant: string) => ({
+      headers: { "Accept-Language": "de", "X-Tenant": tenant },
+    });
+
+    await client.get("/users", request("a"));
+    await client.get("/users", request("a"));
+    await client.get("/users", request("b"));
+
+    expect(adapter).toHaveBeenCalledTimes(2);
+  });
+
+  it("serves an entry of another variant with vary: false", async () => {
+    const { adapter } = backend({ vary: "Accept-Language, *" });
+    const client = setup(adapter, { cache: { vary: false } });
 
     await client.get("/users", { headers: { "Accept-Language": "de" } });
     await client.get("/users", { headers: { "Accept-Language": "en" } });
@@ -272,27 +348,52 @@ describe("Vary", () => {
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("stores a response with Vary: *", async () => {
-    const { adapter } = backend({ vary: "*" });
+  it("lets a single request with vary: false take an entry stored for another variant", async () => {
+    const { adapter } = backend({ vary: "Accept-Language" });
     const client = setup(adapter);
 
-    await client.get("/users");
-    await client.get("/users");
+    await client.get("/users", { headers: { "Accept-Language": "de" } });
+    await client.get("/users", {
+      headers: { "Accept-Language": "en" },
+      retryCache: { cache: { vary: false } },
+    });
 
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
-  it("serves an entry of another variant stale through staleIfError", async () => {
+  it("serves the matching variant stale through staleIfError", async () => {
     const { adapter, state } = backend({ vary: "Accept-Language" });
     const client = setup(adapter, { cache: { ttl: 1, staleIfError: true } });
 
     await client.get("/users", { headers: { "Accept-Language": "de" } });
     await expire();
     state.failing = true;
-    const stale: AxiosResponse = await client.get("/users", {
-      headers: { "Accept-Language": "en" },
-    });
 
-    expect(stale.data).toEqual({ call: 1 });
+    await expect(
+      client.get("/users", { headers: { "Accept-Language": "de" } }),
+    ).resolves.toMatchObject({ data: { call: 1 } });
+  });
+
+  it("serves an entry handed to retryCache.set whatever the request headers", async () => {
+    const { adapter } = backend({ vary: "Accept-Language" });
+    const client = setup(adapter);
+    const response = await client.get("/users", { retryCache: false });
+
+    await client.retryCache.set("get  /users  ", response);
+    await client.get("/users", { headers: { "Accept-Language": "en" } });
+
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the raw request header values out of the stored entry", async () => {
+    const { adapter } = backend({ vary: "X-Api-Key" });
+    const storage = createMemoryStorage();
+    const client = setup(adapter, { storage });
+
+    await client.get("/users", { headers: { "X-Api-Key": "secret-alice" } });
+
+    expect(
+      JSON.stringify([...storage.keys()].map((key) => storage.get(key))),
+    ).not.toContain("secret-alice");
   });
 });

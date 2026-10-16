@@ -49,6 +49,12 @@ export interface CacheOptions {
    * stored. By default `true` with the server defaults, `false` otherwise.
    */
   shared?: boolean;
+  /**
+   * Serve an entry only to requests whose headers named in `Vary` match those
+   * of the request it was stored for, and never store `Vary: *`; `true` by
+   * default. Only headers in `config.headers` count.
+   */
+  vary?: boolean;
   shouldCache?: (context: CacheDecisionContext) => Awaitable<boolean>;
 }
 
@@ -147,6 +153,8 @@ export interface CacheEntry<T = unknown> {
   staleUntil?: number;
   response: CachedResponse<T>;
   request?: CachedRequest;
+  /** Digests of the request headers named in `Vary`, `null` for an absent one */
+  vary?: Record<string, string | null>;
 }
 
 export interface InvalidationTarget extends Partial<CachedRequest> {
