@@ -191,7 +191,7 @@ export function requestedFreshness(
     skipRead:
       skipWrite ||
       directives.has("no-cache") ||
-      Number(directives.get("max-age")) === 0,
+      /^0+$/.test(directives.get("max-age") ?? ""),
     skipWrite,
   };
 }
